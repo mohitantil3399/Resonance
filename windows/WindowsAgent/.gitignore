@@ -1,0 +1,5 @@
+bin/
+obj/
+sync_database.db
+*.cache
+*.pdb

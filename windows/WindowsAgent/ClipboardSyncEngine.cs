@@ -193,6 +193,7 @@ namespace WindowsAgent
 
         /// <summary>
         /// Continuously receive messages from the Android agent.
+        /// Handles multi-frame WebSocket messages by accumulating bytes until EndOfMessage.
         /// </summary>
         private async Task ReceiveLoopAsync(CancellationToken ct)
         {
@@ -202,18 +203,30 @@ namespace WindowsAgent
             {
                 while (!ct.IsCancellationRequested && _webSocket?.State == WebSocketState.Open)
                 {
-                    var result = await _webSocket.ReceiveAsync(
-                        new ArraySegment<byte>(buffer), ct);
+                    // Accumulate frames until we get a complete message
+                    var messageBuilder = new System.IO.MemoryStream();
+                    WebSocketReceiveResult result;
 
-                    if (result.MessageType == WebSocketMessageType.Close)
+                    do
                     {
-                        StatusChanged?.Invoke("Android disconnected");
-                        break;
+                        result = await _webSocket.ReceiveAsync(
+                            new ArraySegment<byte>(buffer), ct);
+
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            StatusChanged?.Invoke("Android disconnected");
+                            return;
+                        }
+
+                        messageBuilder.Write(buffer, 0, result.Count);
                     }
+                    while (!result.EndOfMessage);
 
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
-                        var json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                        var json = Encoding.UTF8.GetString(
+                            messageBuilder.GetBuffer(), 0, (int)messageBuilder.Length);
+                        Debug.WriteLine($"WebSocket received: {json[..Math.Min(json.Length, 100)]}");
                         HandleIncomingClipboard(json);
                     }
                 }
@@ -230,7 +243,55 @@ namespace WindowsAgent
         }
 
         /// <summary>
-        /// Process an incoming clipboard payload from Android.
+        /// Polls the Android agent's /clipboard/history REST endpoint for the latest item.
+        /// This is the primary mechanism for Android→Windows clipboard sync because on
+        /// Android 10+ the foreground service cannot read clipboard content from other apps,
+        /// so the WebSocket push path may not fire.
+        /// </summary>
+        public async Task PollClipboardAsync()
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                var response = await client.GetStringAsync(
+                    $"http://{_hotspotIp}:{_signalingPort}/clipboard/history", cts.Token);
+
+                if (string.IsNullOrWhiteSpace(response) || response.Contains("\"status\":\"empty\""))
+                    return;
+
+                // Parse the latest clipboard item from Android
+                var item = JsonConvert.DeserializeObject<ClipboardHistoryItem>(response);
+                if (item == null || string.IsNullOrEmpty(item.ClipboardId) || string.IsNullOrEmpty(item.Content))
+                    return;
+
+                // Skip if it's from Windows (our own item) or already seen
+                if (item.Source == "windows") return;
+                if (_db.ExistsById(item.ClipboardId)) return;
+
+                Debug.WriteLine($"Poll: new Android clipboard item: {item.Content[..Math.Min(item.Content.Length, 50)]}");
+
+                // Store in local DB
+                _db.InsertItem(item.ClipboardId, item.Source ?? "android", item.Content, item.Timestamp);
+
+                // Set Windows clipboard
+                _lastClipboardContent = item.Content;
+
+                Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    SetClipboardWithRetry(item.Content);
+                    ClipboardReceived?.Invoke(item.Content);
+                    StatusChanged?.Invoke($"Received: {item.Content[..Math.Min(item.Content.Length, 30)]}...");
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Clipboard poll error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Process an incoming clipboard payload from Android (via WebSocket).
         /// </summary>
         private void HandleIncomingClipboard(string json)
         {
@@ -256,21 +317,36 @@ namespace WindowsAgent
 
                 Application.Current?.Dispatcher.Invoke(() =>
                 {
-                    try
-                    {
-                        Clipboard.SetText(payload.Content);
-                        ClipboardReceived?.Invoke(payload.Content);
-                        StatusChanged?.Invoke($"Received: {payload.Content[..Math.Min(payload.Content.Length, 30)]}...");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Error setting clipboard: {ex}");
-                    }
+                    SetClipboardWithRetry(payload.Content);
+                    ClipboardReceived?.Invoke(payload.Content);
+                    StatusChanged?.Invoke($"Received: {payload.Content[..Math.Min(payload.Content.Length, 30)]}...");
                 });
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Error parsing incoming clipboard: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Sets clipboard text with retry logic. The Windows clipboard can throw
+        /// COMException when another app has it locked (e.g., password managers, RDP).
+        /// </summary>
+        private void SetClipboardWithRetry(string text, int maxRetries = 3)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    Clipboard.SetText(text);
+                    return; // success
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Clipboard.SetText attempt {i + 1} failed: {ex.Message}");
+                    if (i < maxRetries - 1)
+                        System.Threading.Thread.Sleep(100); // brief pause before retry
+                }
             }
         }
 
@@ -282,7 +358,7 @@ namespace WindowsAgent
     }
 
     /// <summary>
-    /// JSON payload for clipboard sync messages.
+    /// JSON payload for clipboard sync messages (WebSocket).
     /// </summary>
     public class ClipboardPayload
     {
@@ -295,4 +371,24 @@ namespace WindowsAgent
         [JsonProperty("content")]
         public string? Content { get; set; }
     }
+
+    /// <summary>
+    /// JSON model for the /clipboard/history REST response.
+    /// Matches the Android ClipboardItem entity fields.
+    /// </summary>
+    public class ClipboardHistoryItem
+    {
+        [JsonProperty("clipboardId")]
+        public string? ClipboardId { get; set; }
+
+        [JsonProperty("source")]
+        public string? Source { get; set; }
+
+        [JsonProperty("content")]
+        public string? Content { get; set; }
+
+        [JsonProperty("timestamp")]
+        public long Timestamp { get; set; }
+    }
 }
+

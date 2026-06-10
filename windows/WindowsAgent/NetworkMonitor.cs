@@ -48,6 +48,7 @@ namespace WindowsAgent
         private readonly FileDownloader _fileDownloader;
         private Timer? _retryTimer;
         private Timer? _fileCheckTimer;
+        private Timer? _clipboardPollTimer;
         private bool _probing = false;
         private string? _lastConnectedIp = null;
 
@@ -81,6 +82,7 @@ namespace WindowsAgent
             NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
             _retryTimer?.Dispose();
             _fileCheckTimer?.Dispose();
+            _clipboardPollTimer?.Dispose();
         }
 
         private void OnNetworkChanged(object? sender, EventArgs e)
@@ -104,9 +106,11 @@ namespace WindowsAgent
 
             _probing = true;
 
-            // If WebSocket dropped, clean up the file-check timer
+            // If WebSocket dropped, clean up timers
             _fileCheckTimer?.Dispose();
             _fileCheckTimer = null;
+            _clipboardPollTimer?.Dispose();
+            _clipboardPollTimer = null;
 
             try
             {
@@ -198,6 +202,16 @@ namespace WindowsAgent
                         null,
                         TimeSpan.FromSeconds(2),
                         TimeSpan.FromSeconds(5));
+
+                    // Start polling for clipboard changes every 3 seconds
+                    // This is the primary Android→Windows sync path because Android 10+
+                    // restricts clipboard reading from background services.
+                    _clipboardPollTimer?.Dispose();
+                    _clipboardPollTimer = new Timer(
+                        async _ => await _syncEngine.PollClipboardAsync(),
+                        null,
+                        TimeSpan.FromSeconds(2),
+                        TimeSpan.FromSeconds(3));
 
                     StatusChanged?.Invoke($"Connected ✓  ({ip})");
                     return true;

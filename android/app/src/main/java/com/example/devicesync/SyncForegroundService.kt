@@ -37,6 +37,24 @@ class SyncForegroundService : Service() {
         private const val CHANNEL_ID = "sync_channel"
         private const val NOTIFICATION_ID = 1
         private const val PORT = 7777
+
+        // Shared: the Activity reads this to show connection status and send clipboard
+        private val _connectedClients = ConcurrentHashMap<String, WebSocketSession>()
+
+        /** Number of connected Windows clients (observed by the UI) */
+        val connectedClientsCount: Int
+            get() = _connectedClients.size
+
+        /** Send a JSON payload to all connected Windows clients via WebSocket */
+        suspend fun sendToAllClients(json: String) {
+            _connectedClients.values.forEach { session ->
+                try {
+                    session.send(Frame.Text(json))
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "Error sending to WebSocket client", e)
+                }
+            }
+        }
     }
 
     private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -45,8 +63,8 @@ class SyncForegroundService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private val gson = Gson()
 
-    // Track WebSocket sessions for pushing clipboard updates to Windows
-    private val connectedClients = ConcurrentHashMap<String, WebSocketSession>()
+    // Convenience alias for instance methods to use the shared map
+    private val connectedClients get() = _connectedClients
 
     // The last clipboard content we set ourselves — used for loop prevention
     @Volatile
