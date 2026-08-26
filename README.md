@@ -37,6 +37,37 @@ DeviceSync is a high-performance local network synchronization tool that seamles
    - **On Android**: Use the "Send Clipboard to PC" button or paste text in the app.
    - **On Windows**: Just copy text normally, it instantly syncs to Android.
 
+## ▶️ Running the Windows Agent
+
+The `.NET 9 SDK` is installed **portably** in `d:\SyncDevice\dotnet_sdk\` (nothing on C drive). Because of this, you **cannot** double-click the `.exe` directly — Windows won't know where the runtime is. Use the CLI instead.
+
+### Step 1 — Open PowerShell and run:
+
+```powershell
+$env:DOTNET_ROOT = "d:\SyncDevice\dotnet_sdk"
+$env:PATH = "d:\SyncDevice\dotnet_sdk;$env:PATH"
+d:\SyncDevice\dotnet_sdk\dotnet.exe run --project d:\SyncDevice\windows\WindowsAgent\WindowsAgent.csproj
+```
+
+This will restore NuGet packages (first time only), compile, and launch the Windows Agent window.
+
+### Optional — Build a standalone executable:
+
+```powershell
+$env:DOTNET_ROOT = "d:\SyncDevice\dotnet_sdk"
+$env:PATH = "d:\SyncDevice\dotnet_sdk;$env:PATH"
+d:\SyncDevice\dotnet_sdk\dotnet.exe publish d:\SyncDevice\windows\WindowsAgent\WindowsAgent.csproj -c Release -o d:\SyncDevice\windows\output
+```
+
+Then run it anytime:
+```
+d:\SyncDevice\windows\output\WindowsAgent.exe
+```
+
+> **Why not double-click?** The system looks for .NET in `C:\Program Files\dotnet` by default. Setting `DOTNET_ROOT` points it to the portable SDK on D drive.
+
+---
+
 ## 📱 Screenshots & UI
 
 The Android app features a beautiful, clean Compose UI with a centralized connection status, quick-send actions, and a persistent clipboard journal.

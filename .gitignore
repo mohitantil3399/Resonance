@@ -1,0 +1,12 @@
+# Portable SDK
+dotnet_sdk/
+
+# Build outputs
+windows/output/
+windows/WindowsAgent/bin/
+windows/WindowsAgent/obj/
+android/build/
+android/app/build/
+android/.gradle/
+android/.idea/
+android/local.properties
