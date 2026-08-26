@@ -1,12 +1,14 @@
 package com.example.devicesync.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -19,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.devicesync.data.ClipboardItem
+import com.example.devicesync.data.TransferItem
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -35,6 +38,8 @@ object SyncColors {
     val Red = Color(0xFFF38BA8)
     val Blue = Color(0xFF89B4FA)
     val Mauve = Color(0xFFCBA6F7)
+    val Yellow = Color(0xFFF9E2AF)
+    val Peach = Color(0xFFFAB387)
 }
 
 // ─── Connection Status Card ─────────────────────────────────────────────
@@ -71,13 +76,255 @@ fun ConnectionStatusCard(
                 )
                 Text(
                     text = if (isConnected) "$connectedClients client(s) connected via WebSocket"
-                    else "Start the Windows agent and connect to this hotspot",
+                    else "Connect to phone hotspot and start Windows agent",
                     color = SyncColors.Overlay,
                     fontSize = 12.sp
                 )
             }
         }
     }
+}
+
+// ─── Mode Tab Selector ──────────────────────────────────────────────────
+
+@Composable
+fun ModeTabSelector(
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    PrimaryTabRow(
+        selectedTabIndex = selectedIndex,
+        containerColor = SyncColors.Surface0,
+        contentColor = SyncColors.Mauve,
+        modifier = modifier.clip(RoundedCornerShape(10.dp))
+    ) {
+        Tab(
+            selected = selectedIndex == 0,
+            onClick = { onTabSelected(0) },
+            text = { Text("📋 Clipboard", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+            selectedContentColor = SyncColors.Mauve,
+            unselectedContentColor = SyncColors.Subtext
+        )
+        Tab(
+            selected = selectedIndex == 1,
+            onClick = { onTabSelected(1) },
+            text = { Text("📁 File Transfers", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+            selectedContentColor = SyncColors.Mauve,
+            unselectedContentColor = SyncColors.Subtext
+        )
+    }
+}
+
+// ─── File Transfer Actions Row ──────────────────────────────────────────
+
+@Composable
+fun FileTransferActionsRow(
+    onPickPhotos: () -> Unit,
+    onPickDocs: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Button(
+            onClick = onPickPhotos,
+            modifier = Modifier
+                .weight(1f)
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = SyncColors.Blue)
+        ) {
+            Icon(
+                imageVector = Icons.Default.PhotoLibrary,
+                contentDescription = "Photos & Videos",
+                tint = SyncColors.Base,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Photos & Videos",
+                color = SyncColors.Base,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
+        }
+
+        Button(
+            onClick = onPickDocs,
+            modifier = Modifier
+                .weight(1f)
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = SyncColors.Mauve)
+        ) {
+            Icon(
+                imageVector = Icons.Default.FolderOpen,
+                contentDescription = "Documents",
+                tint = SyncColors.Base,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Documents",
+                color = SyncColors.Base,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
+        }
+    }
+}
+
+// ─── Storage Settings Card ──────────────────────────────────────────────
+
+@Composable
+fun StorageSettingsCard(
+    storagePathDescription: String,
+    onChangeFolder: () -> Unit,
+    onResetDefault: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isCustom = storagePathDescription.startsWith("Custom:")
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = SyncColors.Surface0)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Save,
+                    contentDescription = null,
+                    tint = SyncColors.Peach,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Storage Location",
+                    color = SyncColors.Text,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = storagePathDescription,
+                color = SyncColors.Overlay,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onChangeFolder,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SyncColors.Peach)
+                ) {
+                    Text("Change Folder", fontSize = 12.sp)
+                }
+
+                if (isCustom) {
+                    TextButton(
+                        onClick = onResetDefault,
+                        colors = ButtonDefaults.textButtonColors(contentColor = SyncColors.Subtext)
+                    ) {
+                        Text("Reset to Default", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── File Transfer History Card ─────────────────────────────────────────
+
+@Composable
+fun TransferHistoryCard(
+    item: TransferItem,
+    onOpen: (TransferItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val isSent = item.direction == "sent"
+
+    val iconText = when {
+        item.mimeType.startsWith("image/") -> "🖼️"
+        item.mimeType.startsWith("video/") -> "🎬"
+        item.mimeType.startsWith("audio/") -> "🎵"
+        item.mimeType.contains("pdf") -> "📕"
+        item.mimeType.contains("zip") || item.mimeType.contains("rar") -> "📦"
+        else -> "📄"
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(enabled = !item.localUriOrPath.isNullOrBlank()) { onOpen(item) },
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = SyncColors.Surface1)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = iconText, fontSize = 24.sp)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.fileName,
+                    color = SyncColors.Text,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (isSent) "↑ Sent to PC" else "↓ Received",
+                        color = if (isSent) SyncColors.Blue else SyncColors.Green,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = formatBytes(item.fileSize),
+                        color = SyncColors.Subtext,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = timeFormat.format(Date(item.timestamp)),
+                        color = SyncColors.Overlay,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            if (!item.localUriOrPath.isNullOrBlank()) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = "Open",
+                    tint = SyncColors.Subtext,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB")
+    val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, 3)
+    return String.format(Locale.US, "%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
 }
 
 // ─── Send Clipboard Button ──────────────────────────────────────────────
@@ -91,7 +338,7 @@ fun SendClipboardButton(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp),
+            .height(52.dp),
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = SyncColors.Mauve)
     ) {
@@ -105,7 +352,7 @@ fun SendClipboardButton(
             text = "Send Clipboard to PC",
             color = SyncColors.Base,
             fontWeight = FontWeight.Bold,
-            fontSize = 16.sp
+            fontSize = 15.sp
         )
     }
 }
@@ -235,7 +482,7 @@ fun ClipboardHistoryCard(
     }
 }
 
-// ─── Empty State ────────────────────────────────────────────────────────
+// ─── Empty States ───────────────────────────────────────────────────────
 
 @Composable
 fun ClipboardEmptyState(modifier: Modifier = Modifier) {
@@ -247,6 +494,22 @@ fun ClipboardEmptyState(modifier: Modifier = Modifier) {
     ) {
         Text(
             text = "No clipboard items yet.\nCopy something and tap Send!",
+            color = SyncColors.Overlay,
+            fontSize = 14.sp
+        )
+    }
+}
+
+@Composable
+fun TransferEmptyState(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "No file transfers yet.\nTap 'Photos & Videos' or 'Documents' above,\nor share any file from your gallery/files app!",
             color = SyncColors.Overlay,
             fontSize = 14.sp
         )

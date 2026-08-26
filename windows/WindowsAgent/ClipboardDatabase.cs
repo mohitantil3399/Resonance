@@ -6,17 +6,17 @@ using System.IO;
 namespace WindowsAgent
 {
     /// <summary>
-    /// Local SQLite clipboard journal for the Windows agent.
-    /// Mirrors the Android Room schema for clipboard_items.
+    /// Local SQLite database for clipboard journal and file transfers.
+    /// Mirrors the Android Room schema.
     /// </summary>
     public class ClipboardDatabase
     {
-        private const int MaxItems = 10;
+        private const int MaxClipboardItems = 10;
+        private const int MaxTransferItems = 20;
         private readonly string _connectionString;
 
         public ClipboardDatabase()
         {
-            // Store DB alongside the executable
             var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "sync_database.db");
             _connectionString = $"Data Source={dbPath}";
             InitializeDatabase();
@@ -35,27 +35,34 @@ namespace WindowsAgent
                     content     TEXT NOT NULL,
                     timestamp   INTEGER NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS file_transfers (
+                    transferId  TEXT PRIMARY KEY,
+                    fileName    TEXT NOT NULL,
+                    fileSize    INTEGER NOT NULL,
+                    mimeType    TEXT NOT NULL,
+                    direction   TEXT NOT NULL,
+                    status      TEXT NOT NULL,
+                    localPath   TEXT,
+                    timestamp   INTEGER NOT NULL
+                );
             ";
             cmd.ExecuteNonQuery();
         }
 
-        /// <summary>
-        /// Insert a clipboard item, enforcing the 10-item cap.
-        /// Returns true if the item was new, false if it was a duplicate.
-        /// </summary>
+        // ─── Clipboard operations ───────────────────────────────────────────
+
         public bool InsertItem(string clipboardId, string source, string content, long timestamp)
         {
             using var connection = new SqliteConnection(_connectionString);
             connection.Open();
 
-            // Loop prevention: check if this ID already exists
             var checkCmd = connection.CreateCommand();
             checkCmd.CommandText = "SELECT COUNT(*) FROM clipboard_items WHERE clipboardId = @id";
             checkCmd.Parameters.AddWithValue("@id", clipboardId);
             var exists = Convert.ToInt64(checkCmd.ExecuteScalar()) > 0;
             if (exists) return false;
 
-            // Insert
             var insertCmd = connection.CreateCommand();
             insertCmd.CommandText = @"
                 INSERT OR REPLACE INTO clipboard_items (clipboardId, source, content, timestamp)
@@ -67,15 +74,10 @@ namespace WindowsAgent
             insertCmd.Parameters.AddWithValue("@ts", timestamp);
             insertCmd.ExecuteNonQuery();
 
-            // Enforce 10-item cap
-            EnforceCap(connection);
-
+            EnforceClipboardCap(connection);
             return true;
         }
 
-        /// <summary>
-        /// Check if a clipboard ID already exists (for loop prevention).
-        /// </summary>
         public bool ExistsById(string clipboardId)
         {
             using var connection = new SqliteConnection(_connectionString);
@@ -86,9 +88,6 @@ namespace WindowsAgent
             return Convert.ToInt64(cmd.ExecuteScalar()) > 0;
         }
 
-        /// <summary>
-        /// Get all clipboard items, newest first.
-        /// </summary>
         public List<ClipboardEntry> GetAllItems()
         {
             var items = new List<ClipboardEntry>();
@@ -111,19 +110,90 @@ namespace WindowsAgent
             return items;
         }
 
-        private void EnforceCap(SqliteConnection connection)
+        private void EnforceClipboardCap(SqliteConnection connection)
         {
             var countCmd = connection.CreateCommand();
             countCmd.CommandText = "SELECT COUNT(*) FROM clipboard_items";
             var count = Convert.ToInt64(countCmd.ExecuteScalar());
 
-            while (count > MaxItems)
+            while (count > MaxClipboardItems)
             {
                 var deleteCmd = connection.CreateCommand();
                 deleteCmd.CommandText = @"
                     DELETE FROM clipboard_items 
                     WHERE clipboardId = (
                         SELECT clipboardId FROM clipboard_items ORDER BY timestamp ASC LIMIT 1
+                    )
+                ";
+                deleteCmd.ExecuteNonQuery();
+                count--;
+            }
+        }
+
+        // ─── File Transfer operations ───────────────────────────────────────
+
+        public void InsertTransfer(TransferEntry entry)
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT OR REPLACE INTO file_transfers (transferId, fileName, fileSize, mimeType, direction, status, localPath, timestamp)
+                VALUES (@id, @name, @size, @mime, @dir, @status, @path, @ts)
+            ";
+            cmd.Parameters.AddWithValue("@id", entry.TransferId);
+            cmd.Parameters.AddWithValue("@name", entry.FileName);
+            cmd.Parameters.AddWithValue("@size", entry.FileSize);
+            cmd.Parameters.AddWithValue("@mime", entry.MimeType);
+            cmd.Parameters.AddWithValue("@dir", entry.Direction);
+            cmd.Parameters.AddWithValue("@status", entry.Status);
+            cmd.Parameters.AddWithValue("@path", (object?)entry.LocalPath ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ts", entry.Timestamp);
+            cmd.ExecuteNonQuery();
+
+            EnforceTransferCap(connection);
+        }
+
+        public List<TransferEntry> GetAllTransfers()
+        {
+            var items = new List<TransferEntry>();
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT transferId, fileName, fileSize, mimeType, direction, status, localPath, timestamp FROM file_transfers ORDER BY timestamp DESC";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                items.Add(new TransferEntry
+                {
+                    TransferId = reader.GetString(0),
+                    FileName = reader.GetString(1),
+                    FileSize = reader.GetInt64(2),
+                    MimeType = reader.GetString(3),
+                    Direction = reader.GetString(4),
+                    Status = reader.GetString(5),
+                    LocalPath = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    Timestamp = reader.GetInt64(7)
+                });
+            }
+            return items;
+        }
+
+        private void EnforceTransferCap(SqliteConnection connection)
+        {
+            var countCmd = connection.CreateCommand();
+            countCmd.CommandText = "SELECT COUNT(*) FROM file_transfers";
+            var count = Convert.ToInt64(countCmd.ExecuteScalar());
+
+            while (count > MaxTransferItems)
+            {
+                var deleteCmd = connection.CreateCommand();
+                deleteCmd.CommandText = @"
+                    DELETE FROM file_transfers 
+                    WHERE transferId = (
+                        SELECT transferId FROM file_transfers ORDER BY timestamp ASC LIMIT 1
                     )
                 ";
                 deleteCmd.ExecuteNonQuery();
@@ -137,6 +207,18 @@ namespace WindowsAgent
         public string ClipboardId { get; set; } = "";
         public string Source { get; set; } = "";
         public string Content { get; set; } = "";
+        public long Timestamp { get; set; }
+    }
+
+    public class TransferEntry
+    {
+        public string TransferId { get; set; } = "";
+        public string FileName { get; set; } = "";
+        public long FileSize { get; set; }
+        public string MimeType { get; set; } = "";
+        public string Direction { get; set; } = ""; // "sent" or "received"
+        public string Status { get; set; } = "";    // "completed", "failed", "in_progress"
+        public string? LocalPath { get; set; }
         public long Timestamp { get; set; }
     }
 }

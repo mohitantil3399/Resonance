@@ -5,10 +5,11 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [ClipboardItem::class], version = 1, exportSchema = false)
+@Database(entities = [ClipboardItem::class, TransferItem::class], version = 2, exportSchema = false)
 abstract class SyncDatabase : RoomDatabase() {
 
     abstract fun clipboardDao(): ClipboardDao
+    abstract fun transferDao(): TransferDao
 
     companion object {
         @Volatile
@@ -20,7 +21,9 @@ abstract class SyncDatabase : RoomDatabase() {
                     context.applicationContext,
                     SyncDatabase::class.java,
                     "sync_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration(true)
+                .build()
                 INSTANCE = instance
                 instance
             }

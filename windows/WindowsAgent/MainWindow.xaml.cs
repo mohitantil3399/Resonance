@@ -1,19 +1,23 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
+using Microsoft.Win32;
 
 namespace WindowsAgent;
 
 /// <summary>
 /// Interaction logic for MainWindow.xaml
-/// Wires up the ClipboardListener to the SyncEngine and displays status/history.
 /// </summary>
 public partial class MainWindow : Window
 {
     private readonly ClipboardListener _clipboardListener;
     private readonly ObservableCollection<ClipboardDisplayItem> _clipboardItems = new();
+    private readonly ObservableCollection<TransferDisplayItem> _transferItems = new();
 
     public MainWindow()
     {
@@ -21,11 +25,25 @@ public partial class MainWindow : Window
 
         _clipboardListener = new ClipboardListener();
         ClipboardList.ItemsSource = _clipboardItems;
+        TransfersList.ItemsSource = _transferItems;
 
-        // Wire up status updates
+        DownloadPathText.Text = App.StorageSettings.DownloadFolder;
+
+        // Wire up clipboard events
         App.SyncEngine.StatusChanged += OnStatusChanged;
         App.Monitor.StatusChanged += OnStatusChanged;
         App.SyncEngine.ClipboardReceived += OnClipboardReceived;
+
+        // Wire up file transfer events
+        App.FileDownloader.StatusChanged += OnStatusChanged;
+        App.FileDownloader.DownloadProgressChanged += OnProgressChanged;
+        App.FileDownloader.FileDownloaded += OnFileTransferCompleted;
+
+        App.FileUploader.StatusChanged += OnStatusChanged;
+        App.FileUploader.UploadProgressChanged += OnProgressChanged;
+        App.FileUploader.FileUploaded += OnFileTransferCompleted;
+
+        App.StorageSettings.DownloadPathChanged += path => Dispatcher.Invoke(() => DownloadPathText.Text = path);
 
         Loaded += OnWindowLoaded;
         Closed += OnWindowClosed;
@@ -33,12 +51,19 @@ public partial class MainWindow : Window
 
     private void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
-        // Start the native clipboard listener (needs HWND)
+        // Start native clipboard listener
         _clipboardListener.Start(this);
         _clipboardListener.ClipboardTextChanged += OnLocalClipboardChanged;
 
-        // Load existing history from DB
+        // Update SendTo button status
+        if (ShellIntegration.IsSendToRegistered())
+        {
+            SendToMenuBtn.Content = "✓ Added to Right-Click";
+            SendToMenuBtn.IsEnabled = false;
+        }
+
         RefreshHistory();
+        RefreshTransfers();
     }
 
     private void OnWindowClosed(object? sender, EventArgs e)
@@ -47,9 +72,10 @@ public partial class MainWindow : Window
         _clipboardListener.Dispose();
     }
 
+    // ─── Clipboard handlers ─────────────────────────────────────────────
+
     private async void OnLocalClipboardChanged(string text)
     {
-        // Push to Android via sync engine
         await App.SyncEngine.OnWindowsClipboardChangedAsync(text);
         Dispatcher.Invoke(RefreshHistory);
     }
@@ -59,28 +85,161 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(RefreshHistory);
     }
 
+    // ─── File Transfer UI handlers ──────────────────────────────────────
+
+    private void OnTabClipboardClicked(object sender, RoutedEventArgs e)
+    {
+        ClipboardView.Visibility = Visibility.Visible;
+        TransfersView.Visibility = Visibility.Collapsed;
+        TabClipboardBtn.Background = new SolidColorBrush(Color.FromRgb(0x45, 0x47, 0x5A));
+        TabTransfersBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
+    }
+
+    private void OnTabTransfersClicked(object sender, RoutedEventArgs e)
+    {
+        ClipboardView.Visibility = Visibility.Collapsed;
+        TransfersView.Visibility = Visibility.Visible;
+        TabClipboardBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
+        TabTransfersBtn.Background = new SolidColorBrush(Color.FromRgb(0x45, 0x47, 0x5A));
+        RefreshTransfers();
+    }
+
+    private async void OnSelectFilesClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Photos, Videos, or Documents to Send",
+            Multiselect = true,
+            Filter = "All Files (*.*)|*.*|Images|*.jpg;*.jpeg;*.png;*.webp;*.heic|Videos|*.mp4;*.mkv;*.mov;*.avi|Documents|*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.zip"
+        };
+
+        if (dialog.ShowDialog(this) == true && dialog.FileNames.Length > 0)
+        {
+            await App.FileUploader.UploadFilesAsync(dialog.FileNames);
+        }
+    }
+
+    private void OnChangeDownloadFolderClicked(object sender, RoutedEventArgs e)
+    {
+        App.StorageSettings.BrowseAndSelectFolder(this);
+    }
+
+    private void OnOpenDownloadFolderClicked(object sender, RoutedEventArgs e)
+    {
+        App.StorageSettings.OpenInExplorer();
+    }
+
+    private void OnRegisterSendToClicked(object sender, RoutedEventArgs e)
+    {
+        bool success = ShellIntegration.RegisterSendToShortcut();
+        if (success)
+        {
+            SendToMenuBtn.Content = "✓ Added to Right-Click";
+            SendToMenuBtn.IsEnabled = false;
+            MessageBox.Show(
+                "You can now right-click any file in Windows File Explorer -> 'Send to' -> 'Send to Android (DeviceSync)' to beam it instantly!",
+                "DeviceSync Integration", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+    private void OnTransferItemDoubleClicked(object sender, MouseButtonEventArgs e)
+    {
+        if (TransfersList.SelectedItem is TransferDisplayItem item && !string.IsNullOrWhiteSpace(item.LocalPath))
+        {
+            try
+            {
+                if (File.Exists(item.LocalPath))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = item.LocalPath,
+                        UseShellExecute = true
+                    });
+                }
+                else if (Directory.Exists(App.StorageSettings.DownloadFolder))
+                {
+                    App.StorageSettings.OpenInExplorer();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Could not open file: {ex.Message}");
+            }
+        }
+    }
+
+    // ─── Drag & Drop ────────────────────────────────────────────────────
+
+    private void OnWindowDragEnter(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            DropOverlay.Visibility = Visibility.Visible;
+            e.Effects = DragDropEffects.Copy;
+        }
+    }
+
+    private void OnWindowDragLeave(object sender, DragEventArgs e)
+    {
+        DropOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private async void OnWindowDrop(object sender, DragEventArgs e)
+    {
+        DropOverlay.Visibility = Visibility.Collapsed;
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            var files = (string[]?)e.Data.GetData(DataFormats.FileDrop);
+            if (files != null && files.Length > 0)
+            {
+                // Switch to transfers view
+                OnTabTransfersClicked(this, new RoutedEventArgs());
+                await App.FileUploader.UploadFilesAsync(files);
+            }
+        }
+    }
+
+    // ─── Progress & Event updates ───────────────────────────────────────
+
+    private void OnProgressChanged(string fileName, int percent, long transferred, long total)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            ProgressCard.Visibility = Visibility.Visible;
+            ProgressFileName.Text = fileName;
+            ProgressPercentText.Text = $"{percent}% ({FormatBytes(transferred)} / {FormatBytes(total)})";
+            TransferProgressBar.Value = percent;
+        });
+    }
+
+    private void OnFileTransferCompleted(TransferEntry entry)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            ProgressCard.Visibility = Visibility.Collapsed;
+            RefreshTransfers();
+        });
+    }
+
     private void OnStatusChanged(string status)
     {
         Dispatcher.Invoke(() =>
         {
             StatusText.Text = status;
 
-            // Update the status dot color based on connection state
             if (App.SyncEngine.IsConnected)
             {
                 StatusDot.Fill = new SolidColorBrush(Color.FromRgb(0xA6, 0xE3, 0xA1)); // Green
                 DetailText.Text = "Connected to Android agent via WebSocket";
 
-                // Show discovered IP in footer
                 var ipMatch = System.Text.RegularExpressions.Regex.Match(status, @"\d+\.\d+\.\d+\.\d+");
                 if (ipMatch.Success)
                     FooterText.Text = $"Connected to {ipMatch.Value}:7777";
             }
-            else if (status.Contains("Scanning") || status.Contains("Connecting") || status.Contains("found"))
+            else if (status.Contains("Scanning") || status.Contains("Connecting") || status.Contains("found") || status.Contains("Sending") || status.Contains("Downloading"))
             {
                 StatusDot.Fill = new SolidColorBrush(Color.FromRgb(0xF9, 0xE2, 0xAF)); // Yellow
-                DetailText.Text = "Attempting to reach Android agent...";
-                FooterText.Text = "Scanning subnet for Android agent on port 7777...";
+                DetailText.Text = status;
             }
             else
             {
@@ -106,14 +265,65 @@ public partial class MainWindow : Window
             });
         }
     }
+
+    private void RefreshTransfers()
+    {
+        var items = App.Database.GetAllTransfers();
+        _transferItems.Clear();
+        foreach (var item in items.Take(20))
+        {
+            var isSent = item.Direction == "sent";
+            var icon = GetIcon(item.MimeType, item.FileName);
+
+            _transferItems.Add(new TransferDisplayItem
+            {
+                FileName = item.FileName,
+                FormattedSize = FormatBytes(item.FileSize),
+                DirectionDisplay = isSent ? "↑ Sent to Phone" : "↓ Received",
+                DirectionColor = new SolidColorBrush(isSent ? Color.FromRgb(0x89, 0xB4, 0xFA) : Color.FromRgb(0xA6, 0xE3, 0xA1)),
+                TimeDisplay = DateTimeOffset.FromUnixTimeMilliseconds(item.Timestamp)
+                    .LocalDateTime.ToString("HH:mm:ss"),
+                IconText = icon,
+                LocalPath = item.LocalPath
+            });
+        }
+    }
+
+    private static string GetIcon(string mimeType, string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (mimeType.StartsWith("image/") || ext is ".jpg" or ".jpeg" or ".png" or ".webp" or ".heic" or ".gif") return "🖼️";
+        if (mimeType.StartsWith("video/") || ext is ".mp4" or ".mkv" or ".mov" or ".avi") return "🎬";
+        if (mimeType.StartsWith("audio/") || ext is ".mp3" or ".wav" or ".flac") return "🎵";
+        if (mimeType.Contains("pdf") || ext == ".pdf") return "📕";
+        if (mimeType.Contains("zip") || mimeType.Contains("rar") || ext is ".zip" or ".rar" or ".7z") return "📦";
+        return "📄";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "0 B";
+        string[] units = { "B", "KB", "MB", "GB" };
+        int digitGroups = (int)(Math.Log10(bytes) / Math.Log10(1024));
+        digitGroups = Math.Clamp(digitGroups, 0, 3);
+        return $"{bytes / Math.Pow(1024, digitGroups):F1} {units[digitGroups]}";
+    }
 }
 
-/// <summary>
-/// Display model for the clipboard history list.
-/// </summary>
 public class ClipboardDisplayItem
 {
     public string Content { get; set; } = "";
     public string Source { get; set; } = "";
     public string TimeDisplay { get; set; } = "";
+}
+
+public class TransferDisplayItem
+{
+    public string FileName { get; set; } = "";
+    public string FormattedSize { get; set; } = "";
+    public string DirectionDisplay { get; set; } = "";
+    public Brush DirectionColor { get; set; } = Brushes.White;
+    public string TimeDisplay { get; set; } = "";
+    public string IconText { get; set; } = "📄";
+    public string? LocalPath { get; set; }
 }

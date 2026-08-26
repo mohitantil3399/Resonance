@@ -44,6 +44,7 @@ namespace WindowsAgent
 
         public event Action<string>? StatusChanged;
         public event Action<string>? ClipboardReceived;
+        public event Action? FilesAvailableReceived;
 
         public ClipboardSyncEngine(ClipboardDatabase db)
         {
@@ -297,6 +298,12 @@ namespace WindowsAgent
         {
             try
             {
+                if (json.Contains("\"files_available\""))
+                {
+                    FilesAvailableReceived?.Invoke();
+                    return;
+                }
+
                 var payload = JsonConvert.DeserializeObject<ClipboardPayload>(json);
                 if (payload == null || payload.ClipboardId == null || payload.Content == null)
                     return;
