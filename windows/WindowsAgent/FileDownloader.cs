@@ -9,36 +9,31 @@ using Newtonsoft.Json;
 namespace WindowsAgent
 {
     /// <summary>
-    /// Polls the Android agent for available file transfers and downloads them
-    /// to the user's Downloads folder.
+    /// Downloads available file transfers from the Android agent to the customizable download folder.
     /// </summary>
     public class FileDownloader
     {
-        // Endpoint is updated dynamically by NetworkMonitor after discovery
         private string _hotspotIp = "192.168.43.1";
         private int _signalingPort = 7777;
-        private static readonly HttpClient _client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        private readonly StorageSettings _storageSettings;
+        private readonly ClipboardDatabase _db;
+        private static readonly HttpClient _client = new HttpClient { Timeout = TimeSpan.FromHours(2) };
+        private readonly HashSet<string> _downloadedTokens = new();
 
-        /// <summary>
-        /// Called by NetworkMonitor once the Android agent IP is discovered.
-        /// </summary>
+        public event Action<string>? StatusChanged;
+        public event Action<string, int, long, long>? DownloadProgressChanged;
+        public event Action<TransferEntry>? FileDownloaded;
+
+        public FileDownloader(StorageSettings storageSettings, ClipboardDatabase db)
+        {
+            _storageSettings = storageSettings;
+            _db = db;
+        }
+
         public void UpdateEndpoint(string ip, int port)
         {
             _hotspotIp = ip;
             _signalingPort = port;
-        }
-
-        private readonly string _downloadPath;
-        private readonly HashSet<string> _downloadedTokens = new();
-
-        public event Action<string>? StatusChanged;
-
-        public FileDownloader()
-        {
-            _downloadPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Downloads", "SyncDevice");
-            Directory.CreateDirectory(_downloadPath);
         }
 
         /// <summary>
@@ -58,9 +53,9 @@ namespace WindowsAgent
                 {
                     if (_downloadedTokens.Contains(transfer.Token)) continue;
 
+                    _downloadedTokens.Add(transfer.Token);
                     StatusChanged?.Invoke($"Downloading: {transfer.FileName}...");
                     await DownloadFileAsync(transfer);
-                    _downloadedTokens.Add(transfer.Token);
                 }
             }
             catch (Exception ex)
@@ -73,15 +68,18 @@ namespace WindowsAgent
         {
             try
             {
-                var filePath = Path.Combine(_downloadPath, info.FileName);
+                var downloadFolder = _storageSettings.DownloadFolder;
+                Directory.CreateDirectory(downloadFolder);
 
-                // Handle name collisions
+                var filePath = Path.Combine(downloadFolder, info.FileName);
+
+                // Handle duplicate name collisions (e.g. photo (1).jpg)
                 var counter = 1;
                 var baseName = Path.GetFileNameWithoutExtension(info.FileName);
                 var extension = Path.GetExtension(info.FileName);
                 while (File.Exists(filePath))
                 {
-                    filePath = Path.Combine(_downloadPath, $"{baseName} ({counter}){extension}");
+                    filePath = Path.Combine(downloadFolder, $"{baseName} ({counter}){extension}");
                     counter++;
                 }
 
@@ -92,9 +90,9 @@ namespace WindowsAgent
                 response.EnsureSuccessStatusCode();
 
                 using var stream = await response.Content.ReadAsStreamAsync();
-                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
+                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, true);
 
-                var buffer = new byte[8192];
+                var buffer = new byte[64 * 1024];
                 long totalRead = 0;
                 int bytesRead;
 
@@ -106,12 +104,27 @@ namespace WindowsAgent
                     if (info.Size > 0)
                     {
                         var percent = (int)((totalRead * 100) / info.Size);
+                        DownloadProgressChanged?.Invoke(info.FileName, percent, totalRead, info.Size);
                         StatusChanged?.Invoke($"Downloading {info.FileName}: {percent}%");
                     }
                 }
 
-                StatusChanged?.Invoke($"Downloaded: {info.FileName} → {filePath}");
-                Debug.WriteLine($"FileDownloader: Saved {info.FileName} to {filePath}");
+                var entry = new TransferEntry
+                {
+                    TransferId = info.Token,
+                    FileName = Path.GetFileName(filePath),
+                    FileSize = totalRead > 0 ? totalRead : info.Size,
+                    MimeType = info.MimeType,
+                    Direction = "received",
+                    Status = "completed",
+                    LocalPath = filePath,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                _db.InsertTransfer(entry);
+                FileDownloaded?.Invoke(entry);
+                StatusChanged?.Invoke($"Downloaded: {entry.FileName} ✓");
+                Debug.WriteLine($"FileDownloader: Saved {entry.FileName} to {filePath}");
             }
             catch (Exception ex)
             {

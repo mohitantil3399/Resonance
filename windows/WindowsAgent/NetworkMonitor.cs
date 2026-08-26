@@ -46,6 +46,7 @@ namespace WindowsAgent
 
         private readonly ClipboardSyncEngine _syncEngine;
         private readonly FileDownloader _fileDownloader;
+        private readonly FileUploader _fileUploader;
         private Timer? _retryTimer;
         private Timer? _fileCheckTimer;
         private Timer? _clipboardPollTimer;
@@ -54,10 +55,11 @@ namespace WindowsAgent
 
         public event Action<string>? StatusChanged;
 
-        public NetworkMonitor(ClipboardSyncEngine syncEngine, FileDownloader fileDownloader)
+        public NetworkMonitor(ClipboardSyncEngine syncEngine, FileDownloader fileDownloader, FileUploader fileUploader)
         {
             _syncEngine = syncEngine;
             _fileDownloader = fileDownloader;
+            _fileUploader = fileUploader;
         }
 
         public void Start()
@@ -185,9 +187,10 @@ namespace WindowsAgent
                 Debug.WriteLine($"NetworkMonitor: Found Android agent at {ip} → {body}");
                 StatusChanged?.Invoke($"Android agent found at {ip} — connecting...");
 
-                // Update the sync engine with the discovered IP
+                // Update the sync engine and file transfer endpoints with the discovered IP
                 _syncEngine.UpdateEndpoint(ip, SignalingPort);
                 _fileDownloader.UpdateEndpoint(ip, SignalingPort);
+                _fileUploader.UpdateEndpoint(ip, SignalingPort);
                 _lastConnectedIp = ip;
 
                 // Establish WebSocket

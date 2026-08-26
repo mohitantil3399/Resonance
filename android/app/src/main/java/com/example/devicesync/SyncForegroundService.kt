@@ -3,17 +3,21 @@ package com.example.devicesync
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.devicesync.data.ClipboardRepository
+import com.example.devicesync.data.StoragePreferences
 import com.example.devicesync.data.SyncDatabase
+import com.example.devicesync.data.TransferRepository
 import com.google.gson.Gson
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -35,11 +39,13 @@ class SyncForegroundService : Service() {
     companion object {
         private const val TAG = "SyncService"
         private const val CHANNEL_ID = "sync_channel"
+        private const val TRANSFER_CHANNEL_ID = "transfer_channel"
         private const val NOTIFICATION_ID = 1
         private const val PORT = 7777
 
         // Shared: the Activity reads this to show connection status and send clipboard
         private val _connectedClients = ConcurrentHashMap<String, WebSocketSession>()
+        private val _gson = Gson()
 
         /** Number of connected Windows clients (observed by the UI) */
         val connectedClientsCount: Int
@@ -51,8 +57,28 @@ class SyncForegroundService : Service() {
                 try {
                     session.send(Frame.Text(json))
                 } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Error sending to WebSocket client", e)
+                    Log.e(TAG, "Error sending to WebSocket client", e)
                 }
+            }
+        }
+
+        /** Proactively notify connected Windows clients that new files are available to download */
+        fun notifyFilesAvailable(transfers: List<FileTransferManager.TransferInfo>) {
+            val payload = mapOf(
+                "type" to "files_available",
+                "count" to transfers.size,
+                "transfers" to transfers.map {
+                    mapOf(
+                        "token" to it.token,
+                        "fileName" to it.fileName,
+                        "mimeType" to it.mimeType,
+                        "size" to it.size
+                    )
+                }
+            )
+            val json = _gson.toJson(payload)
+            CoroutineScope(Dispatchers.IO).launch {
+                sendToAllClients(json)
             }
         }
     }
@@ -60,6 +86,7 @@ class SyncForegroundService : Service() {
     private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var clipboardRepo: ClipboardRepository
+    private lateinit var transferRepo: TransferRepository
     private lateinit var clipboardManager: ClipboardManager
     private val gson = Gson()
 
@@ -72,12 +99,13 @@ class SyncForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
         startForeground(NOTIFICATION_ID, createNotification("Starting..."))
 
-        // Initialize database and repository
+        // Initialize database and repositories
         val db = SyncDatabase.getInstance(applicationContext)
         clipboardRepo = ClipboardRepository(db.clipboardDao())
+        transferRepo = TransferRepository(db.transferDao())
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         startSignalingServer()
@@ -114,7 +142,7 @@ class SyncForegroundService : Service() {
                                         "status" to "ok",
                                         "device" to (Build.MODEL ?: "android"),
                                         "protocol" to "1.0",
-                                        "features" to listOf("clipboard", "file_transfer")
+                                        "features" to listOf("clipboard", "file_transfer", "file_upload")
                                     )
                                 ),
                                 ContentType.Application.Json
@@ -135,9 +163,9 @@ class SyncForegroundService : Service() {
                                     )
 
                                     if (inserted) {
-                                // Remember what we set so clipboard listener won't echo it back
-                                lastSetContent = payload.content
-                                withContext(Dispatchers.Main) {
+                                        // Remember what we set so clipboard listener won't echo it back
+                                        lastSetContent = payload.content
+                                        withContext(Dispatchers.Main) {
                                             val clip = ClipData.newPlainText("sync", payload.content)
                                             clipboardManager.setPrimaryClip(clip)
                                         }
@@ -158,7 +186,6 @@ class SyncForegroundService : Service() {
                         // REST endpoint: fetch the current journal
                         get("/clipboard/history") {
                             val latest = clipboardRepo.getLatest()
-                            // For simplicity, return the latest item
                             if (latest != null) {
                                 call.respondText(gson.toJson(latest), ContentType.Application.Json)
                             } else {
@@ -166,7 +193,7 @@ class SyncForegroundService : Service() {
                             }
                         }
 
-                        // ─── File Transfer Endpoints ────────────────────────────
+                        // ─── File Transfer Endpoints (Android -> Windows) ────
 
                         // List all active file transfers
                         get("/transfers") {
@@ -190,38 +217,91 @@ class SyncForegroundService : Service() {
                             }
 
                             val info = FileTransferManager.getTransfer(token)
-                            if (info == null) {
+                            if (info == null || !info.file.exists()) {
                                 call.respondText("""{"error":"not found"}""", ContentType.Application.Json, HttpStatusCode.NotFound)
                                 return@get
                             }
 
                             try {
-                                val inputStream = applicationContext.contentResolver.openInputStream(info.uri)
-                                if (inputStream == null) {
-                                    call.respondText("""{"error":"cannot read file"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
-                                    return@get
-                                }
-
                                 call.response.header("Content-Disposition", "attachment; filename=\"${info.fileName}\"")
-                                call.respondBytesWriter(
-                                    contentType = ContentType.parse(info.mimeType),
-                                    status = HttpStatusCode.OK
-                                ) {
-                                    inputStream.use { input ->
-                                        val buffer = ByteArray(8192)
-                                        var bytesRead: Int
-                                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                                            writeFully(buffer, 0, bytesRead)
-                                        }
-                                    }
-                                }
-                                Log.i(TAG, "File transfer completed: ${info.fileName}")
+                                call.response.header("Content-Length", info.size.toString())
+                                call.respondFile(info.file)
+                                Log.i(TAG, "File transfer served: ${info.fileName}")
                             } catch (e: Exception) {
-                                Log.e(TAG, "File transfer error", e)
+                                Log.e(TAG, "File transfer error for token $token", e)
                                 call.respondText("""{"error":"transfer failed"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
                             }
                         }
-                        // WebSocket: real-time bidirectional clipboard sync
+
+                        // ─── File Upload Endpoint (Windows -> Android) ──────
+
+                        post("/upload") {
+                            try {
+                                val rawFileName = call.request.header("X-File-Name") ?: "file_${System.currentTimeMillis()}"
+                                val fileName = java.net.URLDecoder.decode(rawFileName, "UTF-8")
+                                val mimeType = call.request.header("Content-Type") ?: "application/octet-stream"
+                                val fileSize = call.request.header("X-File-Size")?.toLongOrNull() ?: -1L
+
+                                val destination = StoragePreferences.openDestinationStream(
+                                    applicationContext, fileName, mimeType
+                                )
+
+                                if (destination == null) {
+                                    call.respondText("""{"error":"cannot create destination file"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
+                                    return@post
+                                }
+
+                                updateNotification("Receiving: $fileName...")
+
+                                val channel = call.receiveChannel()
+                                val buffer = ByteArray(64 * 1024)
+                                var totalRead = 0L
+
+                                destination.outputStream.use { outStream ->
+                                    while (!channel.isClosedForRead) {
+                                        val read = channel.readAvailable(buffer, 0, buffer.size)
+                                        if (read <= 0) break
+                                        outStream.write(buffer, 0, read)
+                                        totalRead += read
+
+                                        if (fileSize > 0) {
+                                            val pct = (totalRead * 100 / fileSize).toInt()
+                                            updateNotification("Receiving $fileName: $pct%")
+                                        }
+                                    }
+                                    outStream.flush()
+                                }
+
+                                StoragePreferences.finalizeDestination(applicationContext, destination)
+                                updateNotification("Received: $fileName ✓")
+                                showFileReceivedNotification(fileName, destination.uri, mimeType)
+
+                                // Log into transfer history
+                                transferRepo.addTransfer(
+                                    fileName = fileName,
+                                    fileSize = if (totalRead > 0) totalRead else fileSize,
+                                    mimeType = mimeType,
+                                    direction = "received",
+                                    status = "completed",
+                                    localUriOrPath = destination.uri.toString()
+                                )
+
+                                call.respondText(
+                                    """{"status":"received","fileName":"$fileName","bytes":$totalRead}""",
+                                    ContentType.Application.Json
+                                )
+                                Log.i(TAG, "Successfully received and saved upload: $fileName ($totalRead bytes)")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error handling file upload", e)
+                                call.respondText(
+                                    """{"error":"upload failed: ${e.message}"}""",
+                                    ContentType.Application.Json,
+                                    HttpStatusCode.InternalServerError
+                                )
+                            }
+                        }
+
+                        // WebSocket: real-time bidirectional sync
                         webSocket("/sync") {
                             val sessionId = UUID.randomUUID().toString()
                             connectedClients[sessionId] = this
@@ -241,9 +321,8 @@ class SyncForegroundService : Service() {
                                                     clipboardId = payload.clipboardId
                                                 )
                                                 if (inserted) {
-                                    // Remember what we set so clipboard listener won't echo it back
-                                    lastSetContent = payload.content
-                                    withContext(Dispatchers.Main) {
+                                                    lastSetContent = payload.content
+                                                    withContext(Dispatchers.Main) {
                                                         val clip = ClipData.newPlainText("sync", payload.content)
                                                         clipboardManager.setPrimaryClip(clip)
                                                     }
@@ -274,8 +353,6 @@ class SyncForegroundService : Service() {
     // ─── Android Clipboard Listener ─────────────────────────────────────
 
     private fun startClipboardListener() {
-        // Note: On Android 15+, clipboard change events may only fire when the app
-        // has focus. The foreground service notification keeps us partially alive.
         clipboardManager.addPrimaryClipChangedListener {
             serviceScope.launch {
                 try {
@@ -284,14 +361,12 @@ class SyncForegroundService : Service() {
                     }
                     val text = clip?.getItemAt(0)?.text?.toString() ?: return@launch
 
-                    // Loop prevention: skip if this text is what we just set from a remote update
                     if (text == lastSetContent) {
-                        lastSetContent = null // reset so next real change is captured
+                        lastSetContent = null
                         return@launch
                     }
 
                     val newId = UUID.randomUUID().toString()
-
                     val inserted = clipboardRepo.addItem(
                         content = text,
                         source = "android",
@@ -299,7 +374,6 @@ class SyncForegroundService : Service() {
                     )
 
                     if (inserted) {
-                        // Push to all connected Windows clients via WebSocket
                         val payload = ClipboardPayload(
                             clipboardId = newId,
                             source = "android",
@@ -322,14 +396,9 @@ class SyncForegroundService : Service() {
         }
     }
 
-    // ─── Clipboard Broadcaster (watches DB and pushes changes) ──────────
-
     private fun startClipboardBroadcaster() {
         serviceScope.launch {
             clipboardRepo.getAllItems().collectLatest { items ->
-                // This Flow fires whenever the database changes.
-                // The actual pushing happens in the clipboard listener and WebSocket handler,
-                // but this allows the UI to always reflect the latest state.
                 Log.d(TAG, "Clipboard journal updated: ${items.size} items")
             }
         }
@@ -337,16 +406,29 @@ class SyncForegroundService : Service() {
 
     // ─── Notification Helpers ───────────────────────────────────────────
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(NotificationManager::class.java)
+
+            // Ongoing sync service channel
+            val syncChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Sync Agent Service",
                 NotificationManager.IMPORTANCE_LOW
-            )
-            channel.description = "Local Device Sync Agent background service"
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            ).apply {
+                description = "Local Device Sync Agent background service"
+            }
+            manager.createNotificationChannel(syncChannel)
+
+            // High priority channel for completed file transfers
+            val transferChannel = NotificationChannel(
+                TRANSFER_CHANNEL_ID,
+                "File Transfers",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notifications for received files"
+            }
+            manager.createNotificationChannel(transferChannel)
         }
     }
 
@@ -363,6 +445,31 @@ class SyncForegroundService : Service() {
         val notification = createNotification(statusText)
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun showFileReceivedNotification(fileName: String, uri: Uri, mimeType: String) {
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            fileName.hashCode(),
+            viewIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, TRANSFER_CHANNEL_ID)
+            .setContentTitle("File Received 📥")
+            .setContentText("$fileName from Windows PC")
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify((System.currentTimeMillis() % 10000).toInt() + 100, notification)
     }
 }
 

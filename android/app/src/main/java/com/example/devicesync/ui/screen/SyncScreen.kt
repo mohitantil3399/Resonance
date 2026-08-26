@@ -2,6 +2,12 @@ package com.example.devicesync.ui.screen
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,12 +21,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.devicesync.data.TransferItem
 import com.example.devicesync.ui.components.*
 import com.example.devicesync.ui.viewmodel.SyncViewModel
 
 /**
  * Main sync screen — assembles UI components and wires them to the ViewModel.
- * Stateless with respect to business logic; all state lives in [SyncViewModel].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,6 +34,35 @@ fun SyncScreen(viewModel: SyncViewModel) {
     val context = LocalContext.current
     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clipboardItems by viewModel.clipboardItems.collectAsState()
+    val transferItems by viewModel.transferItems.collectAsState()
+
+    // ── Modern Pickers ──
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(),
+        onResult = { uris ->
+            if (uris.isNotEmpty()) {
+                viewModel.sendFiles(uris)
+            }
+        }
+    )
+
+    val docPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+        onResult = { uris ->
+            if (uris.isNotEmpty()) {
+                viewModel.sendFiles(uris)
+            }
+        }
+    )
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+        onResult = { treeUri ->
+            if (treeUri != null) {
+                viewModel.updateCustomStorageUri(treeUri)
+            }
+        }
+    )
 
     Scaffold(
         containerColor = SyncColors.Base,
@@ -42,12 +77,12 @@ fun SyncScreen(viewModel: SyncViewModel) {
                                 text = "Local Sync Agent",
                                 color = SyncColors.Text,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp
+                                fontSize = 19.sp
                             )
                             Text(
                                 text = "Android ↔ Windows",
                                 color = SyncColors.Overlay,
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                         }
                     }
@@ -64,60 +99,141 @@ fun SyncScreen(viewModel: SyncViewModel) {
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
-            // ── Connection status ──
+            // ── Connection status card ──
             ConnectionStatusCard(connectedClients = viewModel.connectedClientsCount)
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // ── Quick send button (reads system clipboard on tap) ──
-            SendClipboardButton(
-                onClick = { viewModel.readAndSendClipboard(clipboardManager) }
+            // ── Mode Tab Selector ──
+            ModeTabSelector(
+                selectedIndex = viewModel.selectedTabIndex,
+                onTabSelected = viewModel::setTabIndex
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ── Paste / type & send ──
-            PasteAndSendCard(
-                pasteText = viewModel.pasteText,
-                onTextChange = viewModel::onPasteTextChanged,
-                onPasteFromClipboard = { viewModel.pasteFromClipboard(clipboardManager) },
-                onSend = viewModel::sendPasteText
-            )
-
-            // ── Status message ──
+            // ── Transient status message ──
             StatusMessage(
                 message = viewModel.sendStatus,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(vertical = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // ── Clipboard journal header ──
-            Text(
-                text = "📋 Clipboard Journal",
-                color = SyncColors.Subtext,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
-            )
+            if (viewModel.selectedTabIndex == 0) {
+                // ══════════════════════════════════════════════════════════
+                // 📋 CLIPBOARD SYNC VIEW
+                // ══════════════════════════════════════════════════════════
 
-            Spacer(modifier = Modifier.height(8.dp))
+                // Quick send button (reads system clipboard on tap)
+                SendClipboardButton(
+                    onClick = { viewModel.readAndSendClipboard(clipboardManager) }
+                )
 
-            // ── Clipboard history list ──
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(
-                    items = clipboardItems,
-                    key = { it.clipboardId }
-                ) { item ->
-                    ClipboardHistoryCard(item = item)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Paste / type & send card
+                PasteAndSendCard(
+                    pasteText = viewModel.pasteText,
+                    onTextChange = viewModel::onPasteTextChanged,
+                    onPasteFromClipboard = { viewModel.pasteFromClipboard(clipboardManager) },
+                    onSend = viewModel::sendPasteText
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "📋 Clipboard Journal (last 10)",
+                    color = SyncColors.Subtext,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(
+                        items = clipboardItems,
+                        key = { it.clipboardId }
+                    ) { item ->
+                        ClipboardHistoryCard(item = item)
+                    }
+
+                    if (clipboardItems.isEmpty()) {
+                        item { ClipboardEmptyState() }
+                    }
                 }
+            } else {
+                // ══════════════════════════════════════════════════════════
+                // 📁 FILE TRANSFERS VIEW
+                // ══════════════════════════════════════════════════════════
 
-                if (clipboardItems.isEmpty()) {
-                    item { ClipboardEmptyState() }
+                // Quick send actions
+                FileTransferActionsRow(
+                    onPickPhotos = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                        )
+                    },
+                    onPickDocs = {
+                        docPickerLauncher.launch(arrayOf("*/*"))
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Storage location settings card
+                StorageSettingsCard(
+                    storagePathDescription = viewModel.storagePathDescription,
+                    onChangeFolder = { folderPickerLauncher.launch(null) },
+                    onResetDefault = viewModel::resetStorageToDefault
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "📁 Transfer Activity",
+                    color = SyncColors.Subtext,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(
+                        items = transferItems,
+                        key = { it.transferId }
+                    ) { item ->
+                        TransferHistoryCard(
+                            item = item,
+                            onOpen = { openFile(context, it) }
+                        )
+                    }
+
+                    if (transferItems.isEmpty()) {
+                        item { TransferEmptyState() }
+                    }
                 }
             }
         }
+    }
+}
+
+private fun openFile(context: Context, item: TransferItem) {
+    val pathString = item.localUriOrPath ?: return
+    try {
+        val uri = Uri.parse(pathString)
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, item.mimeType)
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        context.startActivity(viewIntent)
+    } catch (e: Exception) {
+        Log.e("SyncScreen", "Unable to open file ${item.fileName}", e)
     }
 }

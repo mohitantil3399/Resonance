@@ -242,26 +242,56 @@ Only the **last 10 copies** are retained. Older entries are automatically delete
 
 ## 8. Testing File Transfer
 
-### Sending a File from Phone to Laptop
+### A. Sending Files from Phone to Laptop
 
-1. On your phone, open any app (Gallery, Files, Chrome, etc.)
-2. Tap the **Share** button on any file (image, video, PDF, anything)
-3. In the Share Sheet, look for **"Send to Laptop"** and tap it
-4. You'll see a confirmation screen: **"Shared successfully!"**
-5. On your laptop, the file will automatically download to:
+#### Method 1: Via Android Share Sheet (Any App)
+1. On your phone, open any app (Google Photos, Gallery, Files, Chrome, etc.).
+2. Select one or multiple photos, videos, or documents.
+3. Tap the **Share** button.
+4. In the Android Share Sheet, select **"Send to PC (DeviceSync)"**.
+5. You'll see a sleek confirmation card showing the items and total size.
+6. The files will automatically stream over the local hotspot and download to your PC's download directory (default: `C:\Users\MOHIT\Downloads\SyncDevice\`).
 
-```
-C:\Users\MOHIT\Downloads\SyncDevice\
-```
+#### Method 2: Via In-App Pickers
+1. Open the **DeviceSync** app on your phone.
+2. Tap the **"📁 File Transfers"** tab.
+3. Tap **"Photos & Videos"** to launch the Android Photo Picker, or **"Documents"** to pick any file.
+4. Select your items — they will immediately beam over to your PC!
 
-6. The Windows Agent status will show download progress (e.g., "Downloading video.mp4: 45%...")
+---
 
-### File Transfer Details
+### B. Sending Files from Laptop to Phone
 
-- Files are transferred via direct HTTP streaming over the hotspot network
-- Large files are chunked in 8KB blocks for reliability
-- Duplicate filenames are handled automatically (adds "(1)", "(2)", etc.)
-- Transfer speed depends on your hotspot bandwidth (typically 10-50 MB/s on WiFi)
+#### Method 1: Drag & Drop
+1. Select any files (photos, 4K videos, PDFs, zip archives) in Windows File Explorer.
+2. Drag them over the **DeviceSync** window on your laptop.
+3. The window will highlight with a drop zone ("Drop files to send to Android").
+4. Release the mouse — the files are streamed immediately to your phone with live percentage progress!
+
+#### Method 2: In-App "Select & Send Files" Button
+1. In the Windows Agent window, switch to the **"📁 File Transfers"** tab.
+2. Click **"📤 Select & Send Files"**.
+3. Pick one or multiple files in the file browser dialog and click **Open**.
+
+#### Method 3: Windows Explorer Right-Click Menu ("Send to")
+1. In the Windows Agent, click **"⚡ Add to Right-Click Menu"** once.
+2. Now, from anywhere in Windows File Explorer, right-click any file(s) ➔ **Send to** ➔ **Send to Android (DeviceSync)**.
+3. The files will be transferred to your phone instantly in the background!
+
+---
+
+### C. Where Received Files Go & Customization
+
+#### On Android:
+- **Zero-Permission Categorization (Default)**:
+  - **Photos**: Automatically saved to `Pictures/SyncDevice` (instantly visible in your Gallery and Google Photos).
+  - **Videos**: Automatically saved to `Movies/SyncDevice`.
+  - **Documents/Other**: Automatically saved to `Download/SyncDevice`.
+- **Custom Folder**: Tap **"Change Folder"** on the File Transfers tab to select any custom directory via Android's folder picker.
+
+#### On Windows:
+- **Default Path**: `C:\Users\MOHIT\Downloads\SyncDevice\`
+- **Custom Path**: Click **"Change..."** in the File Transfers tab to choose any folder on your PC. Click **"Open Folder"** to reveal it in File Explorer anytime.
 
 ---
 

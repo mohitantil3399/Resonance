@@ -1,9 +1,13 @@
 <Window x:Class="WindowsAgent.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Local Sync Agent" Height="500" Width="420"
+        Title="DeviceSync ⚡ Local Sync Agent" Height="680" Width="480"
         WindowStartupLocation="CenterScreen"
-        Background="#1E1E2E" Foreground="White">
+        Background="#1E1E2E" Foreground="#CDD6F4"
+        AllowDrop="True"
+        DragEnter="OnWindowDragEnter"
+        DragLeave="OnWindowDragLeave"
+        Drop="OnWindowDrop">
 
     <Window.Resources>
         <Style x:Key="StatusDot" TargetType="Ellipse">
@@ -12,67 +16,275 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,0,8,0"/>
         </Style>
+
+        <Style x:Key="TabBtn" TargetType="Button">
+            <Setter Property="Background" Value="#313244"/>
+            <Setter Property="Foreground" Value="#CDD6F4"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#45475A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ActionBtn" TargetType="Button">
+            <Setter Property="Background" Value="#CBA6F7"/>
+            <Setter Property="Foreground" Value="#1E1E2E"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#B4BEFE"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SmallBtn" TargetType="Button">
+            <Setter Property="Background" Value="#45475A"/>
+            <Setter Property="Foreground" Value="#CDD6F4"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#585B70"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid Margin="18">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/> <!-- Header -->
+            <RowDefinition Height="Auto"/> <!-- Connection Status -->
+            <RowDefinition Height="Auto"/> <!-- Tabs -->
+            <RowDefinition Height="Auto"/> <!-- Active Progress Card -->
+            <RowDefinition Height="*"/>    <!-- Tab Content (Lists) -->
+            <RowDefinition Height="Auto"/> <!-- Footer -->
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-            <TextBlock Text="⚡" FontSize="28" VerticalAlignment="Center" Margin="0,0,10,0"/>
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="⚡" FontSize="26" VerticalAlignment="Center" Margin="0,0,10,0"/>
             <StackPanel>
-                <TextBlock Text="Local Sync Agent" FontSize="22" FontWeight="Bold" Foreground="#CDD6F4"/>
-                <TextBlock Text="Windows ↔ Android" FontSize="12" Foreground="#6C7086"/>
+                <TextBlock Text="DeviceSync" FontSize="20" FontWeight="Bold" Foreground="#CDD6F4"/>
+                <TextBlock Text="Windows ↔ Android Seamless Sync" FontSize="11" Foreground="#6C7086"/>
             </StackPanel>
         </StackPanel>
 
         <!-- Connection Status -->
-        <Border Grid.Row="1" Background="#313244" CornerRadius="8" Padding="14" Margin="0,0,0,12">
+        <Border Grid.Row="1" Background="#313244" CornerRadius="8" Padding="12" Margin="0,0,0,10">
             <StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <Ellipse x:Name="StatusDot" Style="{StaticResource StatusDot}" Fill="#F38BA8"/>
                     <TextBlock x:Name="StatusText" Text="Waiting for hotspot..." 
-                               FontSize="14" Foreground="#BAC2DE" VerticalAlignment="Center"/>
+                               FontSize="13" FontWeight="SemiBold" Foreground="#BAC2DE" VerticalAlignment="Center"/>
                 </StackPanel>
-                <TextBlock x:Name="DetailText" Text="Connect to your phone's hotspot to begin" 
-                           FontSize="11" Foreground="#585B70" Margin="18,4,0,0"/>
+                <TextBlock x:Name="DetailText" Text="Connect to phone's hotspot to begin" 
+                           FontSize="11" Foreground="#6C7086" Margin="18,3,0,0"/>
             </StackPanel>
         </Border>
 
-        <!-- Section Header -->
-        <TextBlock Grid.Row="2" Text="📋 Clipboard Journal (last 10)" 
-                   FontSize="14" Foreground="#A6ADC8" Margin="0,0,0,8"/>
+        <!-- Mode Switcher Tabs -->
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="TabClipboardBtn" Grid.Column="0" Content="📋 Clipboard" Margin="0,0,4,0" 
+                    Style="{StaticResource TabBtn}" Background="#45475A" Click="OnTabClipboardClicked"/>
+            <Button x:Name="TabTransfersBtn" Grid.Column="1" Content="📁 File Transfers" Margin="4,0,0,0" 
+                    Style="{StaticResource TabBtn}" Background="#313244" Click="OnTabTransfersClicked"/>
+        </Grid>
 
-        <!-- Clipboard History List -->
-        <Border Grid.Row="3" Background="#313244" CornerRadius="8" Padding="4">
-            <ListBox x:Name="ClipboardList" Background="Transparent" BorderThickness="0"
-                     Foreground="#CDD6F4" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Border Background="#45475A" CornerRadius="6" Padding="10,8" Margin="2">
-                            <StackPanel>
-                                <TextBlock Text="{Binding Content}" TextTrimming="CharacterEllipsis" 
-                                           MaxHeight="40" Foreground="#CDD6F4"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                    <TextBlock Text="{Binding Source}" FontSize="10" Foreground="#89B4FA"
-                                               Margin="0,0,12,0"/>
-                                    <TextBlock Text="{Binding TimeDisplay}" FontSize="10" Foreground="#585B70"/>
-                                </StackPanel>
+        <!-- Active Progress Card (Appears during upload or download) -->
+        <Border x:Name="ProgressCard" Grid.Row="3" Background="#313244" CornerRadius="8" Padding="12" Margin="0,0,0,10" Visibility="Collapsed">
+            <StackPanel>
+                <Grid>
+                    <TextBlock x:Name="ProgressFileName" Text="Transferring file..." FontSize="12" FontWeight="SemiBold" Foreground="#CDD6F4" HorizontalAlignment="Left"/>
+                    <TextBlock x:Name="ProgressPercentText" Text="0%" FontSize="12" Foreground="#A6E3A1" HorizontalAlignment="Right"/>
+                </Grid>
+                <ProgressBar x:Name="TransferProgressBar" Height="8" Margin="0,8,0,0" Minimum="0" Maximum="100" Value="0"
+                             Foreground="#CBA6F7" Background="#1E1E2E" BorderThickness="0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Tab Content Area -->
+        <Grid Grid.Row="4">
+            <!-- ════════════════════════════════════════════════════════════ -->
+            <!-- CLIPBOARD VIEW                                              -->
+            <!-- ════════════════════════════════════════════════════════════ -->
+            <Grid x:Name="ClipboardView" Visibility="Visible">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="📋 Clipboard Journal (last 10)" 
+                           FontSize="12" Foreground="#A6ADC8" Margin="2,0,0,6"/>
+
+                <Border Grid.Row="1" Background="#313244" CornerRadius="8" Padding="4">
+                    <ListBox x:Name="ClipboardList" Background="Transparent" BorderThickness="0"
+                             Foreground="#CDD6F4" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#45475A" CornerRadius="6" Padding="10,8" Margin="2">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Content}" TextTrimming="CharacterEllipsis" 
+                                                   MaxHeight="40" Foreground="#CDD6F4"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <TextBlock Text="{Binding Source}" FontSize="10" Foreground="#89B4FA"
+                                                       Margin="0,0,12,0"/>
+                                            <TextBlock Text="{Binding TimeDisplay}" FontSize="10" Foreground="#6C7086"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </Grid>
+
+            <!-- ════════════════════════════════════════════════════════════ -->
+            <!-- FILE TRANSFERS VIEW                                         -->
+            <!-- ════════════════════════════════════════════════════════════ -->
+            <Grid x:Name="TransfersView" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/> <!-- Send Actions & Drop Zone -->
+                    <RowDefinition Height="Auto"/> <!-- Storage Path Settings -->
+                    <RowDefinition Height="Auto"/> <!-- Header -->
+                    <RowDefinition Height="*"/>    <!-- Transfers List -->
+                </Grid.RowDefinitions>
+
+                <!-- Send Actions & Drop Area -->
+                <StackPanel Grid.Row="0" Margin="0,0,0,10">
+                    <Button Content="📤 Select &amp; Send Files (Photos, Videos, Docs)" Style="{StaticResource ActionBtn}" 
+                            Click="OnSelectFilesClicked"/>
+
+                    <!-- Drag & Drop Zone Box -->
+                    <Border Margin="0,8,0,0" Background="#313244" BorderBrush="#45475A" BorderThickness="1.5" 
+                            CornerRadius="8" Padding="12">
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="📥 Drag &amp; Drop files here to beam to Android" 
+                                       FontSize="12" Foreground="#BAC2DE" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Any photo, 4K video, PDF, or folder" 
+                                       FontSize="10" Foreground="#6C7086" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Storage Location Card -->
+                <Border Grid.Row="1" Background="#313244" CornerRadius="8" Padding="10" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0">
+                            <TextBlock Text="📁 Save Location:" FontSize="11" Foreground="#A6ADC8" HorizontalAlignment="Left"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="Change..." Style="{StaticResource SmallBtn}" Click="OnChangeDownloadFolderClicked" Margin="0,0,6,0"/>
+                                <Button Content="Open Folder" Style="{StaticResource SmallBtn}" Click="OnOpenDownloadFolderClicked"/>
                             </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                        </Grid>
+                        <TextBlock x:Name="DownloadPathText" Grid.Row="1" Text="C:\Users\...\Downloads\SyncDevice" 
+                                   FontSize="11" Foreground="#89B4FA" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/>
+                    </Grid>
+                </Border>
+
+                <!-- Transfer History Section Header -->
+                <Grid Grid.Row="2" Margin="2,0,0,6">
+                    <TextBlock Text="📁 Transfer History" FontSize="12" Foreground="#A6ADC8" HorizontalAlignment="Left"/>
+                    <Button x:Name="SendToMenuBtn" Content="⚡ Add to Right-Click Menu" Style="{StaticResource SmallBtn}" 
+                            HorizontalAlignment="Right" Click="OnRegisterSendToClicked"/>
+                </Grid>
+
+                <!-- Transfers List -->
+                <Border Grid.Row="3" Background="#313244" CornerRadius="8" Padding="4">
+                    <ListBox x:Name="TransfersList" Background="Transparent" BorderThickness="0"
+                             Foreground="#CDD6F4" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             MouseDoubleClick="OnTransferItemDoubleClicked">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#45475A" CornerRadius="6" Padding="10,8" Margin="2" Cursor="Hand">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="{Binding IconText}" FontSize="18" VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" 
+                                                       FontWeight="SemiBold" Foreground="#CDD6F4"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                <TextBlock Text="{Binding DirectionDisplay}" FontSize="10" Foreground="{Binding DirectionColor}"
+                                                           FontWeight="SemiBold" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding FormattedSize}" FontSize="10" Foreground="#A6ADC8" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding TimeDisplay}" FontSize="10" Foreground="#6C7086"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <TextBlock Grid.Column="2" Text="Open ↗" FontSize="10" Foreground="#CBA6F7" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Drop Overlay (Appears during DragOver) -->
+        <Border x:Name="DropOverlay" Grid.Row="0" Grid.RowSpan="5" Background="#EE1E1E2E" 
+                CornerRadius="12" BorderBrush="#CBA6F7" BorderThickness="2" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Text="✨" FontSize="42" HorizontalAlignment="Center"/>
+                <TextBlock Text="Drop files to send to Android" FontSize="16" FontWeight="Bold" Foreground="#CDD6F4" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                <TextBlock Text="Supports photos, videos, and all documents" FontSize="12" Foreground="#A6ADC8" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+            </StackPanel>
         </Border>
 
         <!-- Footer -->
-        <TextBlock Grid.Row="4" x:Name="FooterText" Text="Scanning for Android agent on port 7777..." 
-                   FontSize="10" Foreground="#45475A" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+        <TextBlock Grid.Row="5" x:Name="FooterText" Text="Scanning for Android agent on port 7777..." 
+                   FontSize="10" Foreground="#585B70" HorizontalAlignment="Center" Margin="0,8,0,0"/>
     </Grid>
 </Window>
