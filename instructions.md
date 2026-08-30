@@ -1,6 +1,6 @@
 # Local Device Sync Agent — Instructions
 
-> Everything you need to build, deploy, run, and test the clipboard sync + file transfer system between your **Vivo V2246 (Android)** and **Windows 11 laptop**.
+> Complete guide to build, deploy, run, and test the clipboard sync, media transfer, and notification mirroring system between your **Android device** and **Windows PC**.
 
 ---
 
@@ -10,48 +10,56 @@
 2. [Project Structure](#2-project-structure)
 3. [Building the Android Agent](#3-building-the-android-agent)
 4. [Building the Windows Agent](#4-building-the-windows-agent)
-5. [First-Time Setup on Your Vivo Phone](#5-first-time-setup-on-your-vivo-phone)
+5. [First-Time Setup on Android](#5-first-time-setup-on-android)
 6. [Running the System](#6-running-the-system)
 7. [Testing Clipboard Sync](#7-testing-clipboard-sync)
 8. [Testing File Transfer](#8-testing-file-transfer)
-9. [How It Works Under the Hood](#9-how-it-works-under-the-hood)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Stopping Everything](#11-stopping-everything)
-12. [Uninstalling](#12-uninstalling)
+9. [Testing Notification Mirroring & Call Intercept](#9-testing-notification-mirroring--call-intercept)
+10. [How It Works Under the Hood](#10-how-it-works-under-the-hood)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Stopping Everything](#12-stopping-everything)
 
 ---
 
 ## 1. Prerequisites
 
-### On Your Laptop
+### On Your PC
 
-| Requirement | Where It Is | Notes |
-|---|---|---|
-| Android Studio | Already installed | Used to build and install the Android app |
-| .NET 9 SDK | `d:\SyncDevice\dotnet_sdk\` | Already installed portably on D drive. **Nothing on C drive.** |
-| ADB | Comes with Android Studio | Used to install the APK via USB |
+| Requirement | Notes |
+|---|---|
+| .NET 9.0 SDK | Installed globally via official installer or used portably via `dotnet` CLI |
+| Android Studio / Android SDK | Used to build and deploy the Android app |
+| ADB (Android Debug Bridge) | Included with Android SDK / Android Studio for installing APK over USB |
 
 ### On Your Phone
 
 | Requirement | Notes |
 |---|---|
-| Vivo V2246 | Running Android 14 or 15 |
+| Android Device | Running Android 8.0+ (API 26+) |
 | USB Debugging enabled | Settings → System → Developer Options → USB Debugging → ON |
-| Hotspot capability | The phone acts as the network host |
+| Hotspot capability | The phone acts as the local network host |
 
 ---
 
 ## 2. Project Structure
 
 ```
-d:\SyncDevice\
-├── android\                    ← Android Studio project (open this folder)
-├── windows\
-│   └── WindowsAgent\          ← .NET 9 WPF project
-├── dotnet_sdk\                ← Portable .NET 9 SDK (D drive only)
-├── uninstall_dotnet.bat       ← One-click .NET removal script
-├── dotnet-install.ps1         ← SDK installer script (already used)
-└── instructions.md            ← This file
+.
+├── android/                   ← Android Studio project (Jetpack Compose + Ktor)
+│   ├── app/
+│   │   └── src/main/java/com/example/devicesync/
+│   │       ├── crypto/        ← ECDHE P-256 + AES-256-GCM session cryptography
+│   │       ├── notifications/ ← NotificationListenerService & RemoteInput reply
+│   │       ├── ui/            ← Jetpack Compose UI (Catppuccin Mocha theme)
+│   │       └── SyncForegroundService.kt
+├── windows/
+│   └── WindowsAgent/          ← .NET 9.0 WPF Client
+│       ├── NotificationEngine.cs
+│       ├── SessionCrypto.cs
+│       ├── ClipboardSyncEngine.cs
+│       └── MainWindow.xaml
+├── README.md
+└── instructions.md
 ```
 
 ---
@@ -60,31 +68,34 @@ d:\SyncDevice\
 
 ### Step 1: Open in Android Studio
 
-1. Open Android Studio
-2. Click **File → Open**
-3. Navigate to `d:\SyncDevice\android` and select it
-4. Wait for Gradle sync to complete (this may take a few minutes the first time as it downloads Ktor, Room, and WebRTC dependencies)
+1. Open Android Studio.
+2. Click **File → Open**.
+3. Select the `android/` directory in this repository.
+4. Wait for Gradle sync to complete.
 
 ### Step 2: Connect Your Phone via USB
 
-1. Plug your Vivo V2246 into the laptop with a USB cable
-2. On the phone, tap **Allow USB Debugging** when prompted
-3. In Android Studio, your device should appear in the device dropdown (top toolbar)
+1. Plug your phone into your PC with a USB cable.
+2. On the phone, tap **Allow USB Debugging** when prompted.
+3. In Android Studio, your device should appear in the target device dropdown.
 
 ### Step 3: Build and Install
 
-1. Select your Vivo device from the device dropdown
-2. Click the green **Run ▶** button (or press `Shift + F10`)
-3. Wait for the build to complete and the app to install
-4. The app will open automatically on your phone
+1. Select your target device from the device dropdown.
+2. Click the green **Run ▶** button (or press `Shift + F10`).
+3. Alternatively, build and install via CLI:
+   ```bash
+   cd android
+   ./gradlew assembleDebug
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+4. The app will launch automatically on your phone.
 
 ### Step 4: Verify Installation
 
 After the app opens, you should see:
-- A screen saying **"Hello Sync Agent is running in background!"**
-- A persistent notification in your notification drawer: **"Local Sync Agent — Listening for Windows Agent connection..."**
-
-> **Important:** You can now close the app. The service will keep running in the background via the notification.
+- The Catppuccin-themed **Local Sync Agent** screen.
+- A persistent notification in your drawer: **"Local Sync Agent — Server running on :7777"**.
 
 ---
 
@@ -92,363 +103,160 @@ After the app opens, you should see:
 
 ### Option A: Run Directly (Recommended for Testing)
 
-Open **PowerShell** and run:
+Open **PowerShell** in the repository root:
 
 ```powershell
-$env:DOTNET_ROOT = "d:\SyncDevice\dotnet_sdk"
-$env:PATH = "d:\SyncDevice\dotnet_sdk;$env:PATH"
-d:\SyncDevice\dotnet_sdk\dotnet.exe run --project d:\SyncDevice\windows\WindowsAgent\WindowsAgent.csproj
+dotnet run --project windows/WindowsAgent/WindowsAgent.csproj
 ```
 
-This will:
-1. Restore NuGet packages (first time only)
-2. Compile the project
-3. Launch the Windows Agent window
+This will automatically restore dependencies, compile the project, and launch the Windows Agent window.
 
 ### Option B: Build a Standalone Executable
 
 ```powershell
-$env:DOTNET_ROOT = "d:\SyncDevice\dotnet_sdk"
-$env:PATH = "d:\SyncDevice\dotnet_sdk;$env:PATH"
-d:\SyncDevice\dotnet_sdk\dotnet.exe publish d:\SyncDevice\windows\WindowsAgent\WindowsAgent.csproj -c Release -o d:\SyncDevice\windows\output
+dotnet publish windows/WindowsAgent/WindowsAgent.csproj -c Release -o ./publish
 ```
 
-Then run the agent anytime by double-clicking:
-```
-d:\SyncDevice\windows\output\WindowsAgent.exe
+Then run the agent anytime by launching:
+```powershell
+./publish/WindowsAgent.exe
 ```
 
 ---
 
-## 5. First-Time Setup on Your Vivo Phone
+## 5. First-Time Setup on Android
 
-Vivo phones aggressively kill background services. You **must** change these settings once, or the sync agent will be killed after a few minutes.
+Manufacturers (e.g., Vivo, Xiaomi, Samsung) aggressively optimize background services. Ensure these one-time settings are configured:
 
-### Step 1: Disable Battery Optimization for DeviceSync
-
-1. Go to **Settings → Battery → Background Power Consumption Management**
-2. Find **DeviceSync** in the app list
-3. Set it to **No Restrictions** (or "Allow background activity")
+### Step 1: Disable Battery Optimization
+1. Go to **Settings → Battery → Background Power Consumption Management** (or App Battery Usage).
+2. Find **DeviceSync** and set it to **No Restrictions** (or "Allow background activity").
 
 ### Step 2: Enable Auto Start
+1. Go to **Settings → Apps → Special App Access → Auto Start**.
+2. Find **DeviceSync** and toggle it **ON**.
 
-1. Go to **Settings → Apps → Special App Access → Auto Start** (or search "Auto Start" in Settings)
-2. Find **DeviceSync** and toggle it **ON**
+### Step 3: Lock App in Recent Apps
+1. Open the DeviceSync app.
+2. Swipe up to Recent Apps view.
+3. Tap the **lock icon** on the DeviceSync card to prevent system eviction.
 
-### Step 3: Lock the App in Recent Apps
-
-1. Open the DeviceSync app
-2. Open the Recent Apps view (swipe up and hold)
-3. Tap the **lock icon** on the DeviceSync card (this prevents Vivo from killing it)
-
-### Step 4: Grant Notification Permission
-
-- When you first open the app, it will ask for notification permission. **Tap Allow.**
-- The persistent notification is what keeps the background service alive.
+### Step 4: Grant Notification Access
+1. Switch to the **🔔 Notifications** tab in the app.
+2. Tap **Grant Notification Access** (opens system settings).
+3. Toggle **DeviceSync** to **ON** so it can mirror incoming notifications and calls.
 
 ---
 
 ## 6. Running the System
 
-Here is the exact sequence to get everything working:
-
 ### Step 1: Start the Android Agent
-
-1. Open the **DeviceSync** app on your Vivo phone (just once — then you can close it)
-2. Verify the notification appears: **"Local Sync Agent — Server running on :7777"**
+1. Open the **DeviceSync** app on your phone.
+2. Verify the notification indicates the server is running on port 7777.
 
 ### Step 2: Enable Hotspot on the Phone
+1. Go to **Settings → Hotspot & Tethering → Wi-Fi Hotspot**.
+2. Turn it **ON**.
 
-1. Go to **Settings → Hotspot & Tethering → Wi-Fi Hotspot**
-2. Turn it **ON**
-3. Note your hotspot name and password
-
-### Step 3: Connect Laptop to Hotspot
-
-1. On your Windows laptop, go to **Wi-Fi settings**
-2. Connect to your phone's hotspot network
-3. Wait for the connection to establish
+### Step 3: Connect PC to Hotspot
+1. On your Windows PC, connect to your phone's Wi-Fi hotspot.
 
 ### Step 4: Start the Windows Agent
-
-1. Open **PowerShell** and run:
-
-```powershell
-$env:DOTNET_ROOT = "d:\SyncDevice\dotnet_sdk"
-$env:PATH = "d:\SyncDevice\dotnet_sdk;$env:PATH"
-d:\SyncDevice\dotnet_sdk\dotnet.exe run --project d:\SyncDevice\windows\WindowsAgent\WindowsAgent.csproj
-```
-
-2. The **Local Sync Agent** window will open
-3. Watch the status indicator:
-   - 🔴 Red dot → "Waiting for hotspot..." (not connected yet)
-   - 🟡 Yellow dot → "Probing hotspot..." (trying to connect)
-   - 🟢 Green dot → "Connected ✓" (you're good to go!)
-
-### What Happens Automatically
-
-```
-Phone hotspot ON
-       ↓
-Laptop connects to hotspot WiFi
-       ↓
-Windows Agent probes 192.168.43.1:7777
-       ↓
-Android Agent responds to /hello
-       ↓
-WebSocket connection established
-       ↓
-Clipboard sync is LIVE
-File transfer polling starts
-```
-
-The whole process takes **2-5 seconds** after the laptop joins the hotspot.
+1. Run the Windows Agent via `dotnet run --project windows/WindowsAgent/WindowsAgent.csproj` or launch `WindowsAgent.exe`.
+2. Watch the status indicator:
+   - 🔴 Red dot ➔ "Waiting for hotspot..."
+   - 🟡 Yellow dot ➔ "Probing hotspot..."
+   - 🟢 Green dot ➔ "Connected ✓" (and "🔒 Encrypted session established")
 
 ---
 
 ## 7. Testing Clipboard Sync
 
-### Test 1: Copy on Windows → Paste on Android
+### Test 1: Copy on Windows ➔ Paste on Android
+1. On your PC, copy any text (`Ctrl+C`).
+2. The Windows Agent status will show: **"Sent: [text]..."**
+3. On your phone, the notification will update: **"Received: [text]..."**
+4. Paste anywhere on your phone — the copied text appears immediately.
 
-1. On your laptop, copy any text (e.g., `Ctrl+C` on "Hello from Windows")
-2. Watch the Windows Agent window — it should show: **"Sent: Hello from Windows..."**
-3. On your phone, the notification should update: **"Received: Hello from Windows..."**
-4. On your phone, open any app and **long press → Paste** — the text should appear!
-
-### Test 2: Copy on Android → Paste on Windows
-
-1. On your phone, copy any text (e.g., long press on a URL in Chrome and tap "Copy")
-2. Watch the phone notification — it should show: **"Sent: [your text]..."**
-3. On your laptop, the Windows Agent status should update: **"Received: [your text]..."**
-4. On your laptop, press `Ctrl+V` anywhere — the text from your phone appears!
-
-### Test 3: Verify Clipboard History
-
-The Windows Agent window shows a **"📋 Clipboard Journal (last 10)"** section. Each item shows:
-- The copied text
-- Whether it came from 📱 Android or 💻 Windows
-- The timestamp
-
-Only the **last 10 copies** are retained. Older entries are automatically deleted.
-
-### Test 4: Loop Prevention
-
-1. Copy "test123" on Windows
-2. It syncs to Android — ✅
-3. Android's clipboard now has "test123", but it does **NOT** send it back to Windows
-4. No infinite loop — the system uses UUID tracking to prevent this
+### Test 2: Copy on Android ➔ Paste on Windows
+1. On your phone, copy any text.
+2. On your PC, press `Ctrl+V` — the copied text from your phone is pasted.
 
 ---
 
 ## 8. Testing File Transfer
 
-### A. Sending Files from Phone to Laptop
+### A. Sending Files from Phone to PC
 
 #### Method 1: Via Android Share Sheet (Any App)
-1. On your phone, open any app (Google Photos, Gallery, Files, Chrome, etc.).
-2. Select one or multiple photos, videos, or documents.
-3. Tap the **Share** button.
-4. In the Android Share Sheet, select **"Send to PC (DeviceSync)"**.
-5. You'll see a sleek confirmation card showing the items and total size.
-6. The files will automatically stream over the local hotspot and download to your PC's download directory (default: `C:\Users\MOHIT\Downloads\SyncDevice\`).
+1. In Google Photos, Gallery, Files, or browser, select any photo, video, or document.
+2. Tap **Share** ➔ choose **Send to PC (DeviceSync)**.
+3. The file streams over the hotspot and downloads to your PC (default: `Downloads/SyncDevice/`).
 
-#### Method 2: Via In-App Pickers
-1. Open the **DeviceSync** app on your phone.
-2. Tap the **"📁 File Transfers"** tab.
-3. Tap **"Photos & Videos"** to launch the Android Photo Picker, or **"Documents"** to pick any file.
-4. Select your items — they will immediately beam over to your PC!
+#### Method 2: Via In-App Visual Pickers
+1. In the app's **"📁 File Transfers"** tab, tap **"Photos & Videos"** or **"Documents"**.
+2. Select your items to beam them to your PC immediately.
 
 ---
 
-### B. Sending Files from Laptop to Phone
+### B. Sending Files from PC to Phone
 
 #### Method 1: Drag & Drop
-1. Select any files (photos, 4K videos, PDFs, zip archives) in Windows File Explorer.
-2. Drag them over the **DeviceSync** window on your laptop.
-3. The window will highlight with a drop zone ("Drop files to send to Android").
-4. Release the mouse — the files are streamed immediately to your phone with live percentage progress!
+1. Drag any file(s) from File Explorer and drop them directly onto the Windows Agent window.
+2. The files are streamed to your phone with live percentage progress.
 
-#### Method 2: In-App "Select & Send Files" Button
-1. In the Windows Agent window, switch to the **"📁 File Transfers"** tab.
-2. Click **"📤 Select & Send Files"**.
-3. Pick one or multiple files in the file browser dialog and click **Open**.
-
-#### Method 3: Windows Explorer Right-Click Menu ("Send to")
-1. In the Windows Agent, click **"⚡ Add to Right-Click Menu"** once.
-2. Now, from anywhere in Windows File Explorer, right-click any file(s) ➔ **Send to** ➔ **Send to Android (DeviceSync)**.
-3. The files will be transferred to your phone instantly in the background!
+#### Method 2: File Explorer Right-Click Menu
+1. In the Windows Agent, click **"⚡ Add to Right-Click Menu"**.
+2. Right-click any file in Windows Explorer ➔ **Send to** ➔ **Send to Android (DeviceSync)**.
 
 ---
 
-### C. Where Received Files Go & Customization
+## 9. Testing Notification Mirroring & Call Intercept
 
-#### On Android:
-- **Zero-Permission Categorization (Default)**:
-  - **Photos**: Automatically saved to `Pictures/SyncDevice` (instantly visible in your Gallery and Google Photos).
-  - **Videos**: Automatically saved to `Movies/SyncDevice`.
-  - **Documents/Other**: Automatically saved to `Download/SyncDevice`.
-- **Custom Folder**: Tap **"Change Folder"** on the File Transfers tab to select any custom directory via Android's folder picker.
+### Test 1: WhatsApp / Messaging Notifications
+1. Receive a WhatsApp, Telegram, or SMS message on your phone.
+2. A native Windows toast notification appears with the sender name and message body.
+3. Type a message in the toast's **reply text box** and click **Send** ➔ the reply is sent directly through your phone!
 
-#### On Windows:
-- **Default Path**: `C:\Users\MOHIT\Downloads\SyncDevice\`
-- **Custom Path**: Click **"Change..."** in the File Transfers tab to choose any folder on your PC. Click **"Open Folder"** to reveal it in File Explorer anytime.
-
----
-
-## 9. How It Works Under the Hood
-
-### Network Layer
-
-```
-Phone (Hotspot Host)          Laptop (Client)
-192.168.43.1                  192.168.43.x
-     │                              │
-     │←── HTTP GET /hello ──────────│  (Discovery)
-     │                              │
-     │←── WebSocket /sync ─────────→│  (Clipboard sync)
-     │                              │
-     │←── HTTP GET /transfer/xxx ───│  (File download)
-```
-
-### Clipboard Sync Protocol
-
-Every clipboard item is a JSON message:
-```json
-{
-  "clipboardId": "a1b2c3d4-...",
-  "source": "windows",
-  "content": "npm install express"
-}
-```
-
-- `clipboardId` — Unique UUID, used for loop prevention
-- `source` — Which device created this copy
-- `content` — The actual clipboard text
-
-### Data Storage
-
-Both devices maintain an identical SQLite database with a `clipboard_items` table:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| clipboardId | TEXT (PK) | UUID for deduplication |
-| source | TEXT | "android" or "windows" |
-| content | TEXT | Clipboard text |
-| timestamp | INTEGER | Epoch milliseconds |
-
-Maximum **10 rows** are retained at any time.
+### Test 2: Incoming Phone Calls
+1. Place a call to your phone.
+2. Windows displays a ringing call toast with **"✓ Answer"** and **"✕ Decline"** buttons.
+3. If the call is unanswered, a non-ringing **Missed Call** alert is displayed.
 
 ---
 
-## 10. Troubleshooting
+## 10. How It Works Under the Hood
 
-### Windows Agent says "Waiting for hotspot..." but I'm connected
+### Network & Cryptography Architecture
 
-**Cause:** The laptop might be connected to the hotspot, but the Android agent isn't running.
-
-**Fix:**
-1. Check the phone notification — is "Local Sync Agent" visible?
-2. If not, open the DeviceSync app once to restart the service
-3. If the notification is there, try restarting the Windows Agent
-
-### Clipboard sync works one way but not the other
-
-**Android → Windows works, but Windows → Android doesn't:**
-- Make sure the WebSocket is connected (green dot in Windows Agent)
-- Check if Android clipboard access is restricted — try copying while the DeviceSync app is briefly in the foreground
-
-**Windows → Android works, but Android → Windows doesn't:**
-- Android 15 may restrict background clipboard reading. Copy text while the DeviceSync notification is visible in the notification shade
-
-### The Android service keeps getting killed
-
-**This is a Vivo-specific issue.** Make sure you've done ALL of these:
-1. ✅ Battery optimization → No Restrictions for DeviceSync
-2. ✅ Auto Start → Enabled for DeviceSync
-3. ✅ Lock in Recent Apps (swipe up → lock icon)
-4. ✅ Notification permission granted
-
-### File transfer doesn't start
-
-1. Make sure you shared the file to **"Send to Laptop"** (not some other app)
-2. Make sure the Windows Agent is running and connected (green dot)
-3. Check that the phone has the file access permission
-
-### Connection drops frequently
-
-The Windows Agent retries every 10 seconds automatically. If the connection keeps dropping:
-1. Make sure the hotspot is stable
-2. Reduce the distance between phone and laptop
-3. Check if any VPN or firewall is blocking port 7777
-
-### Port 7777 is blocked
-
-If another app uses port 7777, you can change it:
-- **Android:** In [SyncForegroundService.kt](file:///d:/SyncDevice/android/app/src/main/java/com/example/devicesync/SyncForegroundService.kt), change `private const val PORT = 7777`
-- **Windows:** Update the `SignalingPort` constant in [NetworkMonitor.cs](file:///d:/SyncDevice/windows/WindowsAgent/NetworkMonitor.cs), [ClipboardSyncEngine.cs](file:///d:/SyncDevice/windows/WindowsAgent/ClipboardSyncEngine.cs), and [FileDownloader.cs](file:///d:/SyncDevice/windows/WindowsAgent/FileDownloader.cs)
+```
+Phone (Hotspot Server: 192.168.43.1)       Windows PC (Client: 192.168.43.x)
+                 │                                        │
+                 │←─────── HTTP GET /hello ───────────────│  (Discovery)
+                 │                                        │
+                 │←─────── WebSocket /sync ──────────────→│  (Signaling)
+                 │                                        │
+                 │←── ECDHE P-256 Key Exchange ──────────→│  (Session Setup)
+                 │                                        │
+                 │←── AES-256-GCM Encrypted Payloads ────→│  (Clipboards & Notifications)
+                 │                                        │
+                 │←─────── HTTP GET/POST /transfers ──────│  (Binary File Streaming)
+```
 
 ---
 
-## 11. Stopping Everything
+## 11. Troubleshooting
 
-### Stop the Windows Agent
-- Simply close the **Local Sync Agent** window, or press `Ctrl+C` in the PowerShell terminal
-
-### Stop the Android Agent
-- Swipe down the notification drawer
-- Tap the **"Local Sync Agent"** notification
-- The app will open — force close it from Recent Apps (swipe up → swipe the card away, after unlocking it first)
-
-Or:
-- Go to **Settings → Apps → DeviceSync → Force Stop**
+| Issue | Cause | Solution |
+|---|---|---|
+| "Waiting for hotspot..." | PC not on phone's hotspot Wi-Fi | Connect PC to phone hotspot; verify phone server is running. |
+| Notifications not appearing | Notification access missing | Grant Notification Access in Android Settings → Apps → Special Access. |
+| Background service stopped | Battery saver killed service | Set Battery Optimization to "No Restrictions" & enable Auto Start. |
+| Port 7777 blocked | Firewall / VPN restriction | Ensure local hotspot port 7777 is not blocked by third-party firewall. |
 
 ---
 
-## 12. Uninstalling
+## 12. Stopping Everything
 
-### Remove the .NET SDK (one click)
-
-Double-click this file:
-```
-d:\SyncDevice\uninstall_dotnet.bat
-```
-
-This deletes the entire `d:\SyncDevice\dotnet_sdk\` folder. Your C drive was never touched.
-
-### Remove the Windows Agent
-
-Delete the folder:
-```
-d:\SyncDevice\windows\
-```
-
-### Remove the Android App
-
-On your phone:
-1. Go to **Settings → Apps → DeviceSync → Uninstall**
-
-Or long press the app icon → Uninstall
-
-### Remove Everything
-
-Delete the entire folder:
-```
-d:\SyncDevice\
-```
-
-That's it. No registry entries, no system services, no leftover files anywhere. Everything was self-contained.
-
----
-
-## Quick Reference Card
-
-| Action | How |
-|--------|-----|
-| Start Android Agent | Open DeviceSync app once on phone |
-| Start Windows Agent | Run `d:\SyncDevice\dotnet_sdk\dotnet.exe run --project d:\SyncDevice\windows\WindowsAgent\WindowsAgent.csproj` |
-| Copy sync (Win → Phone) | Just `Ctrl+C` on laptop — auto syncs |
-| Copy sync (Phone → Win) | Just copy on phone — auto syncs |
-| Send file to laptop | Share → "Send to Laptop" on phone |
-| Downloaded files location | `C:\Users\MOHIT\Downloads\SyncDevice\` |
-| Change sync port | Edit `PORT`/`SignalingPort` constants (see Troubleshooting) |
-| Uninstall .NET SDK | Double-click `d:\SyncDevice\uninstall_dotnet.bat` |
+* **Windows Agent**: Close the window or press `Ctrl+C` in the terminal.
+* **Android Agent**: Swipe down the notification drawer, tap the DeviceSync notification, and close the app, or tap **Force Stop** in Android Settings.

@@ -1,12 +1,32 @@
-# Portable SDK
-dotnet_sdk/
+# Environment & IDE
+.idea/
+.vscode/
+*.swp
+*~
 
-# Build outputs
+# Portable .NET SDK & setup scripts
+dotnet_sdk/
+*.bat
+*.ps1
+
+# Planning / scratch files
+implementation_plan.md
+FutureScope.md
+
+# Windows build outputs
 windows/output/
 windows/WindowsAgent/bin/
 windows/WindowsAgent/obj/
+windows/WindowsAgent/publish/
+*.user
+*.suo
+
+# Android build outputs
 android/build/
 android/app/build/
 android/.gradle/
 android/.idea/
 android/local.properties
+android/*.apk
+android/*.aab
+android/.kotlin/
