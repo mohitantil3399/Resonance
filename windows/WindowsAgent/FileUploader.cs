@@ -79,6 +79,11 @@ namespace WindowsAgent
                 request.Headers.Add("X-File-Name", Uri.EscapeDataString(fileName));
                 request.Headers.Add("X-File-Size", fileSize.ToString());
 
+                if (App.SyncEngine.SessionToken != null)
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
+                }
+
                 using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, true);
                 using var content = new ProgressableStreamContent(fileStream, 64 * 1024, (sent, total) =>
                 {

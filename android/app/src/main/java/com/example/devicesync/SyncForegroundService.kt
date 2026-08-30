@@ -14,10 +14,12 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.devicesync.crypto.SessionCrypto
 import com.example.devicesync.data.ClipboardRepository
 import com.example.devicesync.data.StoragePreferences
 import com.example.devicesync.data.SyncDatabase
 import com.example.devicesync.data.TransferRepository
+import com.example.devicesync.notifications.DeviceSyncNotificationListener
 import com.google.gson.Gson
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -33,8 +35,24 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import com.google.gson.JsonParser
 
 class SyncForegroundService : Service() {
+
+    /**
+     * Holds a WebSocket session alongside its per-session ECDHE crypto state.
+     */
+    data class ClientSession(
+        val session: WebSocketSession,
+        val crypto: SessionCrypto = SessionCrypto(),
+        val sessionToken: String = UUID.randomUUID().toString()
+    )
+
+    data class ConnectionRequest(
+        val deviceId: String,
+        val deviceName: String,
+        val onResult: (Boolean) -> Unit
+    )
 
     companion object {
         private const val TAG = "SyncService"
@@ -44,8 +62,10 @@ class SyncForegroundService : Service() {
         private const val PORT = 7777
 
         // Shared: the Activity reads this to show connection status and send clipboard
-        private val _connectedClients = ConcurrentHashMap<String, WebSocketSession>()
+        private val _connectedClients = ConcurrentHashMap<String, ClientSession>()
         private val _gson = Gson()
+
+        val pendingConnectionRequest = kotlinx.coroutines.flow.MutableStateFlow<ConnectionRequest?>(null)
 
         /** Number of connected Windows clients (observed by the UI) */
         val connectedClientsCount: Int
@@ -53,11 +73,32 @@ class SyncForegroundService : Service() {
 
         /** Send a JSON payload to all connected Windows clients via WebSocket */
         suspend fun sendToAllClients(json: String) {
-            _connectedClients.values.forEach { session ->
+            _connectedClients.values.forEach { clientSession ->
                 try {
-                    session.send(Frame.Text(json))
+                    clientSession.session.send(Frame.Text(json))
                 } catch (e: Exception) {
                     Log.e(TAG, "Error sending to WebSocket client", e)
+                }
+            }
+        }
+
+        /** Send an encrypted JSON payload to all clients that have completed key exchange */
+        suspend fun sendEncryptedToAllClients(json: String) {
+            _connectedClients.values.forEach { clientSession ->
+                try {
+                    if (clientSession.crypto.isEstablished) {
+                        val encrypted = clientSession.crypto.encrypt(json)
+                        val envelope = _gson.toJson(mapOf(
+                            "type" to "encrypted",
+                            "payload" to encrypted
+                        ))
+                        clientSession.session.send(Frame.Text(envelope))
+                    } else {
+                        // Fallback: send unencrypted if key exchange hasn't happened yet
+                        clientSession.session.send(Frame.Text(json))
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending encrypted to WebSocket client", e)
                 }
             }
         }
@@ -80,6 +121,11 @@ class SyncForegroundService : Service() {
             CoroutineScope(Dispatchers.IO).launch {
                 sendToAllClients(json)
             }
+        }
+
+        /** Get the crypto instance for a specific session (for notification/screen share engines) */
+        fun getCryptoForSession(sessionId: String): SessionCrypto? {
+            return _connectedClients[sessionId]?.crypto
         }
     }
 
@@ -141,62 +187,29 @@ class SyncForegroundService : Service() {
                                     mapOf(
                                         "status" to "ok",
                                         "device" to (Build.MODEL ?: "android"),
-                                        "protocol" to "1.0",
-                                        "features" to listOf("clipboard", "file_transfer", "file_upload")
+                                        "protocol" to "2.0",
+                                        "features" to listOf(
+                                            "clipboard", "file_transfer", "file_upload",
+                                            "notification_mirror", "screen_share", "e2ee"
+                                        )
                                     )
                                 ),
                                 ContentType.Application.Json
                             )
                         }
 
-                        // REST endpoint: Windows pushes a clipboard item here
-                        post("/clipboard") {
-                            try {
-                                val body = call.receiveText()
-                                val payload = gson.fromJson(body, ClipboardPayload::class.java)
-
-                                if (payload.clipboardId != null && payload.content != null && payload.source != null) {
-                                    val inserted = clipboardRepo.addItem(
-                                        content = payload.content,
-                                        source = payload.source,
-                                        clipboardId = payload.clipboardId
-                                    )
-
-                                    if (inserted) {
-                                        // Remember what we set so clipboard listener won't echo it back
-                                        lastSetContent = payload.content
-                                        withContext(Dispatchers.Main) {
-                                            val clip = ClipData.newPlainText("sync", payload.content)
-                                            clipboardManager.setPrimaryClip(clip)
-                                        }
-                                        updateNotification("Received: ${payload.content.take(30)}...")
-                                        call.respondText("""{"status":"accepted"}""", ContentType.Application.Json)
-                                    } else {
-                                        call.respondText("""{"status":"duplicate"}""", ContentType.Application.Json)
-                                    }
-                                } else {
-                                    call.respondText("""{"status":"invalid"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error handling clipboard POST", e)
-                                call.respondText("""{"status":"error"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
-                            }
-                        }
-
-                        // REST endpoint: fetch the current journal
-                        get("/clipboard/history") {
-                            val latest = clipboardRepo.getLatest()
-                            if (latest != null) {
-                                call.respondText(gson.toJson(latest), ContentType.Application.Json)
-                            } else {
-                                call.respondText("""{"status":"empty"}""", ContentType.Application.Json)
-                            }
-                        }
 
                         // ─── File Transfer Endpoints (Android -> Windows) ────
 
                         // List all active file transfers
                         get("/transfers") {
+                            val authHeader = call.request.headers["Authorization"]
+                            val token = authHeader?.removePrefix("Bearer ")
+                            if (token == null || !connectedClients.values.any { it.sessionToken == token }) {
+                                call.respondText("""{"error":"unauthorized"}""", ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                                return@get
+                            }
+
                             val transfers = FileTransferManager.listTransfers().map {
                                 mapOf(
                                     "token" to it.token,
@@ -210,6 +223,13 @@ class SyncForegroundService : Service() {
 
                         // Download a file by transfer token
                         get("/transfer/{token}") {
+                            val authHeader = call.request.headers["Authorization"]
+                            val sessionToken = authHeader?.removePrefix("Bearer ")
+                            if (sessionToken == null || !connectedClients.values.any { it.sessionToken == sessionToken }) {
+                                call.respondText("""{"error":"unauthorized"}""", ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                                return@get
+                            }
+
                             val token = call.parameters["token"]
                             if (token == null) {
                                 call.respondText("""{"error":"missing token"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
@@ -233,12 +253,38 @@ class SyncForegroundService : Service() {
                             }
                         }
 
+                        // Signal that file download is complete and staged cache can be cleaned up
+                        delete("/transfer/{token}") {
+                            val authHeader = call.request.headers["Authorization"]
+                            val sessionToken = authHeader?.removePrefix("Bearer ")
+                            if (sessionToken == null || !connectedClients.values.any { it.sessionToken == sessionToken }) {
+                                call.respondText("""{"error":"unauthorized"}""", ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                                return@delete
+                            }
+
+                            val token = call.parameters["token"]
+                            if (token != null) {
+                                FileTransferManager.removeTransfer(token)
+                                call.respondText("""{"status":"deleted"}""", ContentType.Application.Json)
+                            } else {
+                                call.respondText("""{"error":"missing token"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                            }
+                        }
+
                         // ─── File Upload Endpoint (Windows -> Android) ──────
 
                         post("/upload") {
+                            val authHeader = call.request.headers["Authorization"]
+                            val sessionToken = authHeader?.removePrefix("Bearer ")
+                            if (sessionToken == null || !connectedClients.values.any { it.sessionToken == sessionToken }) {
+                                call.respondText("""{"error":"unauthorized"}""", ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                                return@post
+                            }
+
                             try {
                                 val rawFileName = call.request.header("X-File-Name") ?: "file_${System.currentTimeMillis()}"
-                                val fileName = java.net.URLDecoder.decode(rawFileName, "UTF-8")
+                                val decodedFileName = java.net.URLDecoder.decode(rawFileName, "UTF-8")
+                                val fileName = java.io.File(decodedFileName).name
                                 val mimeType = call.request.header("Content-Type") ?: "application/octet-stream"
                                 val fileSize = call.request.header("X-File-Size")?.toLongOrNull() ?: -1L
 
@@ -301,10 +347,11 @@ class SyncForegroundService : Service() {
                             }
                         }
 
-                        // WebSocket: real-time bidirectional sync
+                        // WebSocket: real-time bidirectional sync with typed message routing
                         webSocket("/sync") {
                             val sessionId = UUID.randomUUID().toString()
-                            connectedClients[sessionId] = this
+                            val clientSession = ClientSession(session = this)
+                            connectedClients[sessionId] = clientSession
                             Log.i(TAG, "Windows client connected: $sessionId")
                             updateNotification("Windows connected ✓")
 
@@ -313,28 +360,14 @@ class SyncForegroundService : Service() {
                                     if (frame is Frame.Text) {
                                         val text = frame.readText()
                                         try {
-                                            val payload = gson.fromJson(text, ClipboardPayload::class.java)
-                                            if (payload.clipboardId != null && payload.content != null && payload.source != null) {
-                                                val inserted = clipboardRepo.addItem(
-                                                    content = payload.content,
-                                                    source = payload.source,
-                                                    clipboardId = payload.clipboardId
-                                                )
-                                                if (inserted) {
-                                                    lastSetContent = payload.content
-                                                    withContext(Dispatchers.Main) {
-                                                        val clip = ClipData.newPlainText("sync", payload.content)
-                                                        clipboardManager.setPrimaryClip(clip)
-                                                    }
-                                                    updateNotification("Received: ${payload.content.take(30)}...")
-                                                }
-                                            }
+                                            routeMessage(sessionId, text)
                                         } catch (e: Exception) {
-                                            Log.e(TAG, "Error parsing WebSocket message", e)
+                                            Log.e(TAG, "Error routing WebSocket message", e)
                                         }
                                     }
                                 }
                             } finally {
+                                clientSession.crypto.reset()
                                 connectedClients.remove(sessionId)
                                 Log.i(TAG, "Windows client disconnected: $sessionId")
                                 updateNotification("Windows disconnected")
@@ -347,6 +380,143 @@ class SyncForegroundService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start server", e)
             }
+        }
+    }
+
+    // ─── Typed Message Router ────────────────────────────────────────────
+
+    /**
+     * Routes an incoming WebSocket message by its "type" field.
+     * Messages without a type are treated as legacy clipboard payloads for backward compat.
+     */
+    private suspend fun routeMessage(sessionId: String, rawJson: String) {
+        val jsonObj = try {
+            JsonParser.parseString(rawJson).asJsonObject
+        } catch (e: Exception) {
+            Log.w(TAG, "Non-JSON WebSocket message: $rawJson")
+            return
+        }
+
+        val type = jsonObj.get("type")?.asString
+
+        when (type) {
+            // ── ECDHE Key Exchange ──
+            "key_exchange" -> {
+                val remotePubKey = jsonObj.get("pubKey")?.asString ?: return
+                val deviceId = jsonObj.get("deviceId")?.asString ?: "unknown"
+                val deviceName = jsonObj.get("deviceName")?.asString ?: "Unknown PC"
+                val clientSession = connectedClients[sessionId] ?: return
+
+                val prefs = getSharedPreferences("trusted_devices", Context.MODE_PRIVATE)
+                val isTrusted = prefs.getBoolean(deviceId, false)
+
+                if (!isTrusted) {
+                    val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                    pendingConnectionRequest.value = ConnectionRequest(deviceId, deviceName) { result ->
+                        deferred.complete(result)
+                        pendingConnectionRequest.value = null
+                    }
+                    val approved = deferred.await()
+                    if (!approved) {
+                        clientSession.session.close(io.ktor.websocket.CloseReason(io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY, "Connection rejected"))
+                        return
+                    }
+                    prefs.edit().putBoolean(deviceId, true).apply()
+                }
+
+                // Generate our keypair and derive the shared secret
+                clientSession.crypto.generateKeyPair()
+                clientSession.crypto.deriveSharedSecret(remotePubKey)
+
+                // Send our public key and session token back
+                val response = gson.toJson(mapOf(
+                    "type" to "key_exchange",
+                    "pubKey" to clientSession.crypto.getPublicKeyBase64(),
+                    "sessionToken" to clientSession.sessionToken
+                ))
+                clientSession.session.send(io.ktor.websocket.Frame.Text(response))
+                Log.i(TAG, "Key exchange completed with session $sessionId")
+                updateNotification("🔒 Encrypted session established")
+            }
+
+            // ── Encrypted envelope — decrypt and re-route ──
+            "encrypted" -> {
+                val encryptedPayload = jsonObj.get("payload")?.asString ?: return
+                val clientSession = connectedClients[sessionId] ?: return
+                if (!clientSession.crypto.isEstablished) {
+                    Log.w(TAG, "Received encrypted message but no key exchange done")
+                    return
+                }
+                val decrypted = clientSession.crypto.decrypt(encryptedPayload)
+                routeMessage(sessionId, decrypted) // re-route the decrypted inner message
+            }
+
+            // ── Clipboard sync (typed) ──
+            "clipboard" -> {
+                val clipboardId = jsonObj.get("clipboardId")?.asString ?: return
+                val source = jsonObj.get("source")?.asString ?: return
+                val content = jsonObj.get("content")?.asString ?: return
+                handleClipboardMessage(clipboardId, source, content)
+            }
+
+            // ── File transfer notification ──
+            "files_available" -> {
+                // This is outbound-only from Android; ignore if received
+                Log.d(TAG, "Ignoring inbound files_available")
+            }
+
+            // ── Notification action from Windows ──
+            "notification_action" -> {
+                val notifKey = jsonObj.get("key")?.asString ?: return
+                val actionIndex = jsonObj.get("actionIndex")?.asInt ?: 0
+                val success = DeviceSyncNotificationListener.executeAction(notifKey, actionIndex)
+                Log.d(TAG, "notification_action executed for key=$notifKey, index=$actionIndex, success=$success")
+            }
+
+            // ── WebRTC signaling (Phase 3d placeholder) ──
+            "webrtc_offer", "webrtc_answer", "webrtc_ice" -> {
+                Log.d(TAG, "WebRTC signaling received: $type (handler pending Phase 3d)")
+                // TODO: Phase 3d — forward to ScreenShareManager
+            }
+
+            // ── Screen share lifecycle (Phase 3d placeholder) ──
+            "screen_share_start", "screen_share_stop" -> {
+                Log.d(TAG, "Screen share lifecycle: $type (handler pending Phase 3d)")
+                // TODO: Phase 3d — forward to ScreenShareManager
+            }
+
+            // ── Legacy/untyped — treat as clipboard payload for backward compat ──
+            null -> {
+                val payload = gson.fromJson(rawJson, ClipboardPayload::class.java)
+                if (payload.clipboardId != null && payload.content != null && payload.source != null) {
+                    handleClipboardMessage(payload.clipboardId, payload.source, payload.content)
+                } else {
+                    Log.w(TAG, "Unknown untyped message: ${rawJson.take(100)}")
+                }
+            }
+
+            else -> {
+                Log.w(TAG, "Unknown message type: $type")
+            }
+        }
+    }
+
+    /**
+     * Process a clipboard sync message (extracted from both typed and legacy paths).
+     */
+    private suspend fun handleClipboardMessage(clipboardId: String, source: String, content: String) {
+        val inserted = clipboardRepo.addItem(
+            content = content,
+            source = source,
+            clipboardId = clipboardId
+        )
+        if (inserted) {
+            lastSetContent = content
+            withContext(Dispatchers.Main) {
+                val clip = ClipData.newPlainText("sync", content)
+                clipboardManager.setPrimaryClip(clip)
+            }
+            updateNotification("Received: ${content.take(30)}...")
         }
     }
 
@@ -380,9 +550,9 @@ class SyncForegroundService : Service() {
                             content = text
                         )
                         val json = gson.toJson(payload)
-                        connectedClients.values.forEach { session ->
+                        connectedClients.values.forEach { clientSession ->
                             try {
-                                session.send(Frame.Text(json))
+                                clientSession.session.send(Frame.Text(json))
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error sending to WebSocket client", e)
                             }

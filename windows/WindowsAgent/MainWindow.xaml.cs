@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private readonly ClipboardListener _clipboardListener;
     private readonly ObservableCollection<ClipboardDisplayItem> _clipboardItems = new();
     private readonly ObservableCollection<TransferDisplayItem> _transferItems = new();
+    private readonly ObservableCollection<NotifDisplayItem> _notificationItems = new();
 
     public MainWindow()
     {
@@ -26,6 +27,7 @@ public partial class MainWindow : Window
         _clipboardListener = new ClipboardListener();
         ClipboardList.ItemsSource = _clipboardItems;
         TransfersList.ItemsSource = _transferItems;
+        NotificationsList.ItemsSource = _notificationItems;
 
         DownloadPathText.Text = App.StorageSettings.DownloadFolder;
 
@@ -44,6 +46,9 @@ public partial class MainWindow : Window
         App.FileUploader.FileUploaded += OnFileTransferCompleted;
 
         App.StorageSettings.DownloadPathChanged += path => Dispatcher.Invoke(() => DownloadPathText.Text = path);
+
+        // Wire notification display updates
+        App.NotificationEngine.NotificationLogUpdated += () => Dispatcher.Invoke(RefreshNotifications);
 
         Loaded += OnWindowLoaded;
         Closed += OnWindowClosed;
@@ -91,17 +96,33 @@ public partial class MainWindow : Window
     {
         ClipboardView.Visibility = Visibility.Visible;
         TransfersView.Visibility = Visibility.Collapsed;
+        NotificationsView.Visibility = Visibility.Collapsed;
         TabClipboardBtn.Background = new SolidColorBrush(Color.FromRgb(0x45, 0x47, 0x5A));
         TabTransfersBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
+        TabNotificationsBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
     }
 
     private void OnTabTransfersClicked(object sender, RoutedEventArgs e)
     {
         ClipboardView.Visibility = Visibility.Collapsed;
         TransfersView.Visibility = Visibility.Visible;
+        NotificationsView.Visibility = Visibility.Collapsed;
         TabClipboardBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
         TabTransfersBtn.Background = new SolidColorBrush(Color.FromRgb(0x45, 0x47, 0x5A));
+        TabNotificationsBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
         RefreshTransfers();
+    }
+
+    private void OnTabNotificationsClicked(object sender, RoutedEventArgs e)
+    {
+        ClipboardView.Visibility = Visibility.Collapsed;
+        TransfersView.Visibility = Visibility.Collapsed;
+        NotificationsView.Visibility = Visibility.Visible;
+        TabClipboardBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
+        TabTransfersBtn.Background = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44));
+        TabNotificationsBtn.Background = new SolidColorBrush(Color.FromRgb(0x45, 0x47, 0x5A));
+        RefreshNotifications();
+        UpdateEncryptionStatus();
     }
 
     private async void OnSelectFilesClicked(object sender, RoutedEventArgs e)
@@ -308,6 +329,46 @@ public partial class MainWindow : Window
         digitGroups = Math.Clamp(digitGroups, 0, 3);
         return $"{bytes / Math.Pow(1024, digitGroups):F1} {units[digitGroups]}";
     }
+
+    private void RefreshNotifications()
+    {
+        var items = App.NotificationEngine.GetDisplayLog();
+        _notificationItems.Clear();
+        // Newest first
+        foreach (var item in items.Reverse())
+        {
+            _notificationItems.Add(new NotifDisplayItem
+            {
+                IconText = item.IsCall ? "📞" : "📨",
+                AppName = item.AppName,
+                Title = item.Title,
+                Text = item.Text,
+                Time = item.Time
+            });
+        }
+    }
+
+    private void UpdateEncryptionStatus()
+    {
+        if (App.SyncEngine.IsEncrypted)
+        {
+            EncryptionStatusIcon.Text = "🔒";
+            EncryptionStatusText.Text = "Encrypted session active (AES-256-GCM)";
+            EncryptionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0xA6, 0xE3, 0xA1));
+        }
+        else if (App.SyncEngine.IsConnected)
+        {
+            EncryptionStatusIcon.Text = "🔑";
+            EncryptionStatusText.Text = "Key exchange in progress...";
+            EncryptionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0xF9, 0xE2, 0xAF));
+        }
+        else
+        {
+            EncryptionStatusIcon.Text = "🔓";
+            EncryptionStatusText.Text = "Not connected";
+            EncryptionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0x6C, 0x70, 0x86));
+        }
+    }
 }
 
 public class ClipboardDisplayItem
@@ -326,4 +387,13 @@ public class TransferDisplayItem
     public string TimeDisplay { get; set; } = "";
     public string IconText { get; set; } = "📄";
     public string? LocalPath { get; set; }
+}
+
+public class NotifDisplayItem
+{
+    public string IconText { get; set; } = "📨";
+    public string AppName { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string Time { get; set; } = "";
 }

@@ -12,8 +12,13 @@ namespace WindowsAgent
     {
         private static readonly string SettingsFilePath = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "settings.txt");
+        private static readonly string DeviceIdFilePath = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "device_id.txt");
 
         private string _downloadFolder;
+        private string _deviceId;
+
+        public string DeviceId => _deviceId;
 
         public event Action<string>? DownloadPathChanged;
 
@@ -39,6 +44,8 @@ namespace WindowsAgent
                 "Downloads", "SyncDevice");
 
             _downloadFolder = defaultFolder;
+            _deviceId = Guid.NewGuid().ToString(); // default
+
             LoadSettings(defaultFolder);
             Directory.CreateDirectory(_downloadFolder);
         }
@@ -54,6 +61,20 @@ namespace WindowsAgent
                     {
                         _downloadFolder = saved;
                     }
+                }
+
+                if (File.Exists(DeviceIdFilePath))
+                {
+                    var savedId = File.ReadAllText(DeviceIdFilePath).Trim();
+                    if (!string.IsNullOrWhiteSpace(savedId))
+                    {
+                        _deviceId = savedId;
+                    }
+                }
+                else
+                {
+                    // Save the newly generated one
+                    File.WriteAllText(DeviceIdFilePath, _deviceId);
                 }
             }
             catch (Exception ex)

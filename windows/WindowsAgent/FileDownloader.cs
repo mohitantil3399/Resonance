@@ -43,10 +43,17 @@ namespace WindowsAgent
         {
             try
             {
-                var response = await _client.GetStringAsync(
-                    $"http://{_hotspotIp}:{_signalingPort}/transfers");
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"http://{_hotspotIp}:{_signalingPort}/transfers");
+                if (App.SyncEngine.SessionToken != null)
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
+                }
 
-                var transfers = JsonConvert.DeserializeObject<List<TransferInfo>>(response);
+                using var response = await _client.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return;
+
+                var json = await response.Content.ReadAsStringAsync();
+                var transfers = JsonConvert.DeserializeObject<List<TransferInfo>>(json);
                 if (transfers == null || transfers.Count == 0) return;
 
                 foreach (var transfer in transfers)
@@ -83,9 +90,13 @@ namespace WindowsAgent
                     counter++;
                 }
 
-                using var response = await _client.GetAsync(
-                    $"http://{_hotspotIp}:{_signalingPort}/transfer/{info.Token}",
-                    HttpCompletionOption.ResponseHeadersRead);
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"http://{_hotspotIp}:{_signalingPort}/transfer/{info.Token}");
+                if (App.SyncEngine.SessionToken != null)
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
+                }
+
+                using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
 
                 response.EnsureSuccessStatusCode();
 
@@ -125,6 +136,22 @@ namespace WindowsAgent
                 FileDownloaded?.Invoke(entry);
                 StatusChanged?.Invoke($"Downloaded: {entry.FileName} ✓");
                 Debug.WriteLine($"FileDownloader: Saved {entry.FileName} to {filePath}");
+
+                // Notify Android to delete the staged cache file
+                try
+                {
+                    var deleteUrl = $"http://{_hotspotIp}:{_signalingPort}/transfer/{info.Token}";
+                    using var deleteReq = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
+                    if (!string.IsNullOrEmpty(App.SyncEngine.SessionToken))
+                    {
+                        deleteReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
+                    }
+                    _ = await _client.SendAsync(deleteReq);
+                }
+                catch (Exception delEx)
+                {
+                    Debug.WriteLine($"FileDownloader: Failed to notify Android of transfer completion: {delEx.Message}");
+                }
             }
             catch (Exception ex)
             {

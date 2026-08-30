@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace WindowsAgent
 {
@@ -24,6 +25,7 @@ namespace WindowsAgent
         private int _signalingPort = 7777;
 
         private readonly ClipboardDatabase _db;
+        private readonly SessionCrypto _crypto = new();
         private ClientWebSocket? _webSocket;
         private CancellationTokenSource? _wsCancellation;
 
@@ -45,6 +47,37 @@ namespace WindowsAgent
         public event Action<string>? StatusChanged;
         public event Action<string>? ClipboardReceived;
         public event Action? FilesAvailableReceived;
+
+        /// <summary>
+        /// Fired when a notification message is received from Android.
+        /// The string payload is the raw JSON of the notification.
+        /// </summary>
+        public event Action<string>? NotificationReceived;
+
+        /// <summary>
+        /// Fired when a notification dismissal is received from Android.
+        /// </summary>
+        public event Action<string>? NotificationDismissed;
+
+        /// <summary>
+        /// Fired when a WebRTC signaling message is received (offer/answer/ice).
+        /// </summary>
+        public event Action<string, string>? WebRtcSignalingReceived; // (type, json)
+
+        /// <summary>
+        /// Fired when a screen share lifecycle message is received.
+        /// </summary>
+        public event Action<string>? ScreenShareLifecycleReceived;
+
+        /// <summary>
+        /// Whether the ECDHE key exchange has completed for this session.
+        /// </summary>
+        public bool IsEncrypted => _crypto.IsEstablished;
+
+        /// <summary>
+        /// Bearer token for authenticating HTTP REST endpoints, negotiated during key exchange.
+        /// </summary>
+        public string? SessionToken { get; private set; }
 
         public ClipboardSyncEngine(ClipboardDatabase db)
         {
@@ -73,6 +106,9 @@ namespace WindowsAgent
 
                 await _webSocket.ConnectAsync(uri, _wsCancellation.Token);
                 StatusChanged?.Invoke("Connected ✓");
+
+                // Initiate ECDHE key exchange
+                await InitiateKeyExchangeAsync();
 
                 // Start listening for incoming messages
                 _ = Task.Run(() => ReceiveLoopAsync(_wsCancellation.Token));
@@ -104,6 +140,7 @@ namespace WindowsAgent
             }
             _webSocket?.Dispose();
             _webSocket = null;
+            _crypto.Reset();
             StatusChanged?.Invoke("Disconnected");
         }
 
@@ -151,46 +188,8 @@ namespace WindowsAgent
                     StatusChanged?.Invoke("Send failed, reconnecting...");
                 }
             }
-            else
-            {
-                // Fallback: push via REST if WebSocket is not connected
-                await PushViaRestAsync(clipboardId, text);
-            }
         }
 
-        /// <summary>
-        /// Fallback REST push when WebSocket is unavailable.
-        /// </summary>
-        private async Task PushViaRestAsync(string clipboardId, string text)
-        {
-            try
-            {
-                using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromSeconds(5);
-
-                var payload = new
-                {
-                    clipboardId,
-                    source = "windows",
-                    content = text
-                };
-                var json = JsonConvert.SerializeObject(payload);
-                var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
-
-                var response = await client.PostAsync(
-                    $"http://{_hotspotIp}:{_signalingPort}/clipboard",
-                    httpContent);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    StatusChanged?.Invoke($"Sent (REST): {text[..Math.Min(text.Length, 30)]}...");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"REST fallback failed: {ex}");
-            }
-        }
 
         /// <summary>
         /// Continuously receive messages from the Android agent.
@@ -228,7 +227,7 @@ namespace WindowsAgent
                         var json = Encoding.UTF8.GetString(
                             messageBuilder.GetBuffer(), 0, (int)messageBuilder.Length);
                         Debug.WriteLine($"WebSocket received: {json[..Math.Min(json.Length, 100)]}");
-                        HandleIncomingClipboard(json);
+                        RouteIncomingMessage(json);
                     }
                 }
             }
@@ -243,97 +242,165 @@ namespace WindowsAgent
             }
         }
 
+        // ─── ECDHE Key Exchange ──────────────────────────────────────────
+
         /// <summary>
-        /// Polls the Android agent's /clipboard/history REST endpoint for the latest item.
-        /// This is the primary mechanism for Android→Windows clipboard sync because on
-        /// Android 10+ the foreground service cannot read clipboard content from other apps,
-        /// so the WebSocket push path may not fire.
+        /// Initiate ECDHE key exchange right after WebSocket connect.
+        /// Windows is always the initiator (sends pubKey first).
         /// </summary>
-        public async Task PollClipboardAsync()
+        private async Task InitiateKeyExchangeAsync()
         {
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                var response = await client.GetStringAsync(
-                    $"http://{_hotspotIp}:{_signalingPort}/clipboard/history", cts.Token);
+                _crypto.GenerateKeyPair();
+                var payload = new { 
+                    type = "key_exchange", 
+                    pubKey = _crypto.GetPublicKeyBase64(),
+                    deviceId = App.StorageSettings.DeviceId,
+                    deviceName = Environment.MachineName
+                };
+                var json = JsonConvert.SerializeObject(payload);
+                var bytes = Encoding.UTF8.GetBytes(json);
 
-                if (string.IsNullOrWhiteSpace(response) || response.Contains("\"status\":\"empty\""))
-                    return;
+                await _webSocket!.SendAsync(
+                    new ArraySegment<byte>(bytes),
+                    WebSocketMessageType.Text,
+                    true,
+                    _wsCancellation?.Token ?? CancellationToken.None);
 
-                // Parse the latest clipboard item from Android
-                var item = JsonConvert.DeserializeObject<ClipboardHistoryItem>(response);
-                if (item == null || string.IsNullOrEmpty(item.ClipboardId) || string.IsNullOrEmpty(item.Content))
-                    return;
-
-                // Skip if it's from Windows (our own item) or already seen
-                if (item.Source == "windows") return;
-                if (_db.ExistsById(item.ClipboardId)) return;
-
-                Debug.WriteLine($"Poll: new Android clipboard item: {item.Content[..Math.Min(item.Content.Length, 50)]}");
-
-                // Store in local DB
-                _db.InsertItem(item.ClipboardId, item.Source ?? "android", item.Content, item.Timestamp);
-
-                // Set Windows clipboard
-                _lastClipboardContent = item.Content;
-
-                Application.Current?.Dispatcher.Invoke(() =>
-                {
-                    SetClipboardWithRetry(item.Content);
-                    ClipboardReceived?.Invoke(item.Content);
-                    StatusChanged?.Invoke($"Received: {item.Content[..Math.Min(item.Content.Length, 30)]}...");
-                });
+                StatusChanged?.Invoke("🔑 Key exchange initiated...");
+                Debug.WriteLine("SessionCrypto: Key exchange message sent");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Clipboard poll error: {ex.Message}");
+                Debug.WriteLine($"Key exchange initiation failed: {ex}");
             }
         }
 
+        // ─── Typed Message Router ────────────────────────────────────────
+
         /// <summary>
-        /// Process an incoming clipboard payload from Android (via WebSocket).
+        /// Routes an incoming WebSocket message by its "type" field.
+        /// Messages without a type are treated as legacy clipboard payloads.
         /// </summary>
-        private void HandleIncomingClipboard(string json)
+        private void RouteIncomingMessage(string json)
         {
             try
             {
-                if (json.Contains("\"files_available\""))
+                JObject? obj;
+                try
                 {
-                    FilesAvailableReceived?.Invoke();
+                    obj = JObject.Parse(json);
+                }
+                catch
+                {
+                    Debug.WriteLine($"Non-JSON WebSocket message: {json[..Math.Min(json.Length, 50)]}");
                     return;
                 }
 
-                var payload = JsonConvert.DeserializeObject<ClipboardPayload>(json);
-                if (payload == null || payload.ClipboardId == null || payload.Content == null)
-                    return;
+                var type = obj["type"]?.ToString();
 
-                // Loop prevention: don't process our own items
-                if (payload.Source == "windows") return;
-
-                // Check if we already have this item
-                if (_db.ExistsById(payload.ClipboardId)) return;
-
-                // Store in local DB
-                var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                _db.InsertItem(payload.ClipboardId, payload.Source ?? "android", payload.Content, timestamp);
-
-                // Update Windows clipboard (must happen on UI thread)
-                _lastSetClipboardId = payload.ClipboardId;
-                _lastClipboardContent = payload.Content;
-
-                Application.Current?.Dispatcher.Invoke(() =>
+                switch (type)
                 {
-                    SetClipboardWithRetry(payload.Content);
-                    ClipboardReceived?.Invoke(payload.Content);
-                    StatusChanged?.Invoke($"Received: {payload.Content[..Math.Min(payload.Content.Length, 30)]}...");
-                });
+                    // ── ECDHE Key Exchange response ──
+                    case "key_exchange":
+                        var remotePubKey = obj["pubKey"]?.ToString();
+                        var token = obj["sessionToken"]?.ToString();
+                        if (remotePubKey != null)
+                        {
+                            _crypto.DeriveSharedSecret(remotePubKey);
+                            SessionToken = token;
+                            StatusChanged?.Invoke("🔒 Encrypted session established");
+                            Debug.WriteLine($"SessionCrypto: Shared secret derived, token={(token != null ? "received" : "missing")}");
+                        }
+                        break;
+
+                    // ── Encrypted envelope — decrypt and re-route ──
+                    case "encrypted":
+                        var encPayload = obj["payload"]?.ToString();
+                        if (encPayload != null && _crypto.IsEstablished)
+                        {
+                            var decrypted = _crypto.Decrypt(encPayload);
+                            RouteIncomingMessage(decrypted);
+                        }
+                        else
+                        {
+                            Debug.WriteLine("Received encrypted message but no key exchange done");
+                        }
+                        break;
+
+                    // ── Clipboard (typed) ──
+                    case "clipboard":
+                        HandleClipboardPayload(obj);
+                        break;
+
+                    // ── File transfer notification ──
+                    case "files_available":
+                        FilesAvailableReceived?.Invoke();
+                        break;
+
+                    // ── Notification mirroring (Phase 3b) ──
+                    case "notification":
+                        NotificationReceived?.Invoke(json);
+                        break;
+
+                    // ── Notification dismissed (Phase 3b) ──
+                    case "notification_dismissed":
+                        NotificationDismissed?.Invoke(json);
+                        break;
+
+                    // ── WebRTC signaling (Phase 3d) ──
+                    case "webrtc_offer":
+                    case "webrtc_answer":
+                    case "webrtc_ice":
+                        WebRtcSignalingReceived?.Invoke(type, json);
+                        break;
+
+                    // ── Screen share lifecycle (Phase 3d) ──
+                    case "screen_share_start":
+                    case "screen_share_stop":
+                        ScreenShareLifecycleReceived?.Invoke(type);
+                        break;
+
+                    default:
+                        Debug.WriteLine($"Unknown message type: {type}");
+                        break;
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error parsing incoming clipboard: {ex}");
+                Debug.WriteLine($"Error routing incoming message: {ex}");
             }
         }
+
+        /// <summary>
+        /// Handle a typed clipboard message (has "type":"clipboard").
+        /// </summary>
+        private void HandleClipboardPayload(JObject obj)
+        {
+            var clipboardId = obj["clipboardId"]?.ToString();
+            var source = obj["source"]?.ToString();
+            var content = obj["content"]?.ToString();
+
+            if (clipboardId == null || source == null || content == null) return;
+            if (source == "windows") return;
+            if (_db.ExistsById(clipboardId)) return;
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _db.InsertItem(clipboardId, source, content, timestamp);
+
+            _lastSetClipboardId = clipboardId;
+            _lastClipboardContent = content;
+
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                SetClipboardWithRetry(content);
+                ClipboardReceived?.Invoke(content);
+                StatusChanged?.Invoke($"Received: {content[..Math.Min(content.Length, 30)]}...");
+            });
+        }
+
+
 
         /// <summary>
         /// Sets clipboard text with retry logic. The Windows clipboard can throw
@@ -362,6 +429,46 @@ namespace WindowsAgent
         /// This prevents the NetworkMonitor from skipping probes on a stale/dead socket.
         /// </summary>
         public bool IsConnected => _webSocket?.State == WebSocketState.Open;
+
+        /// <summary>
+        /// Send a raw JSON payload to the Android agent via WebSocket.
+        /// Used by NotificationEngine, ScreenShareEngine, etc.
+        /// </summary>
+        public async Task SendRawAsync(string json)
+        {
+            if (_webSocket?.State != WebSocketState.Open) return;
+
+            var bytes = Encoding.UTF8.GetBytes(json);
+            try
+            {
+                await _webSocket.SendAsync(
+                    new ArraySegment<byte>(bytes),
+                    WebSocketMessageType.Text,
+                    true,
+                    _wsCancellation?.Token ?? CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"SendRawAsync error: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Send an encrypted JSON payload. If key exchange is not complete, sends unencrypted.
+        /// </summary>
+        public async Task SendEncryptedAsync(string json)
+        {
+            if (_crypto.IsEstablished)
+            {
+                var encrypted = _crypto.Encrypt(json);
+                var envelope = JsonConvert.SerializeObject(new { type = "encrypted", payload = encrypted });
+                await SendRawAsync(envelope);
+            }
+            else
+            {
+                await SendRawAsync(json);
+            }
+        }
     }
 
     /// <summary>
@@ -377,25 +484,6 @@ namespace WindowsAgent
 
         [JsonProperty("content")]
         public string? Content { get; set; }
-    }
-
-    /// <summary>
-    /// JSON model for the /clipboard/history REST response.
-    /// Matches the Android ClipboardItem entity fields.
-    /// </summary>
-    public class ClipboardHistoryItem
-    {
-        [JsonProperty("clipboardId")]
-        public string? ClipboardId { get; set; }
-
-        [JsonProperty("source")]
-        public string? Source { get; set; }
-
-        [JsonProperty("content")]
-        public string? Content { get; set; }
-
-        [JsonProperty("timestamp")]
-        public long Timestamp { get; set; }
     }
 }
 

@@ -102,14 +102,21 @@ fun ModeTabSelector(
         Tab(
             selected = selectedIndex == 0,
             onClick = { onTabSelected(0) },
-            text = { Text("📋 Clipboard", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+            text = { Text("📋 Clipboard", fontWeight = FontWeight.SemiBold, fontSize = 13.sp) },
             selectedContentColor = SyncColors.Mauve,
             unselectedContentColor = SyncColors.Subtext
         )
         Tab(
             selected = selectedIndex == 1,
             onClick = { onTabSelected(1) },
-            text = { Text("📁 File Transfers", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+            text = { Text("📁 Transfers", fontWeight = FontWeight.SemiBold, fontSize = 13.sp) },
+            selectedContentColor = SyncColors.Mauve,
+            unselectedContentColor = SyncColors.Subtext
+        )
+        Tab(
+            selected = selectedIndex == 2,
+            onClick = { onTabSelected(2) },
+            text = { Text("🔔 Notifs", fontWeight = FontWeight.SemiBold, fontSize = 13.sp) },
             selectedContentColor = SyncColors.Mauve,
             unselectedContentColor = SyncColors.Subtext
         )

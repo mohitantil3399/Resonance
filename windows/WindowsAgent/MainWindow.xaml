@@ -126,11 +126,14 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <Button x:Name="TabClipboardBtn" Grid.Column="0" Content="📋 Clipboard" Margin="0,0,4,0" 
+            <Button x:Name="TabClipboardBtn" Grid.Column="0" Content="📋 Clipboard" Margin="0,0,3,0" 
                     Style="{StaticResource TabBtn}" Background="#45475A" Click="OnTabClipboardClicked"/>
-            <Button x:Name="TabTransfersBtn" Grid.Column="1" Content="📁 File Transfers" Margin="4,0,0,0" 
+            <Button x:Name="TabTransfersBtn" Grid.Column="1" Content="📁 Transfers" Margin="3,0,3,0" 
                     Style="{StaticResource TabBtn}" Background="#313244" Click="OnTabTransfersClicked"/>
+            <Button x:Name="TabNotificationsBtn" Grid.Column="2" Content="🔔 Notifs" Margin="3,0,0,0" 
+                    Style="{StaticResource TabBtn}" Background="#313244" Click="OnTabNotificationsClicked"/>
         </Grid>
 
         <!-- Active Progress Card (Appears during upload or download) -->
@@ -264,6 +267,65 @@
                                         </StackPanel>
 
                                         <TextBlock Grid.Column="2" Text="Open ↗" FontSize="10" Foreground="#CBA6F7" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </Grid>
+
+            <!-- ════════════════════════════════════════════════════════════ -->
+            <!-- NOTIFICATIONS VIEW                                         -->
+            <!-- ════════════════════════════════════════════════════════════ -->
+            <Grid x:Name="NotificationsView" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Encryption Status -->
+                <Border Grid.Row="0" Background="#313244" CornerRadius="8" Padding="10" Margin="0,0,0,10">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="EncryptionStatusIcon" Text="🔒" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="EncryptionStatusText" Text="Encrypted session active" 
+                                   FontSize="11" Foreground="#A6E3A1" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Header -->
+                <TextBlock Grid.Row="1" Text="🔔 Mirrored Notifications" 
+                           FontSize="12" Foreground="#A6ADC8" Margin="2,0,0,6"/>
+
+                <!-- Notifications List -->
+                <Border Grid.Row="2" Background="#313244" CornerRadius="8" Padding="4">
+                    <ListBox x:Name="NotificationsList" Background="Transparent" BorderThickness="0"
+                             Foreground="#CDD6F4" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#45475A" CornerRadius="6" Padding="10,8" Margin="2">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="{Binding IconText}" FontSize="18" 
+                                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding AppName}" FontSize="10" Foreground="#89B4FA"
+                                                       FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" 
+                                                       FontWeight="SemiBold" Foreground="#CDD6F4" MaxHeight="18"/>
+                                            <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" 
+                                                       Foreground="#BAC2DE" MaxHeight="32" TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <TextBlock Grid.Column="2" Text="{Binding Time}" FontSize="10" 
+                                                   Foreground="#6C7086" VerticalAlignment="Top" Margin="6,0,0,0"/>
                                     </Grid>
                                 </Border>
                             </DataTemplate>

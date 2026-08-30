@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.devicesync.ui.components.SyncColors
 import com.example.devicesync.ui.theme.DeviceSyncTheme
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 
 /**
@@ -82,10 +83,14 @@ class ShareReceiverActivity : ComponentActivity() {
                     if (!text.isNullOrBlank()) {
                         val newId = java.util.UUID.randomUUID().toString()
                         val payload = ClipboardPayload(newId, "android", text)
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            val db = com.example.devicesync.data.SyncDatabase.getInstance(applicationContext)
-                            com.example.devicesync.data.ClipboardRepository(db.clipboardDao()).addItem(text, "android", newId)
-                            SyncForegroundService.sendToAllClients(com.google.gson.Gson().toJson(payload))
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            try {
+                                val db = com.example.devicesync.data.SyncDatabase.getInstance(applicationContext)
+                                com.example.devicesync.data.ClipboardRepository(db.clipboardDao()).addItem(text, "android", newId)
+                                SyncForegroundService.sendToAllClients(com.google.gson.Gson().toJson(payload))
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to sync shared text", e)
+                            }
                         }
                         return ShareResult(true, "Text Synced 📋", text.take(60), 1)
                     }

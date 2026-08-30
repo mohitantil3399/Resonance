@@ -45,21 +45,15 @@ namespace WindowsAgent
         };
 
         private readonly ClipboardSyncEngine _syncEngine;
-        private readonly FileDownloader _fileDownloader;
-        private readonly FileUploader _fileUploader;
         private Timer? _retryTimer;
-        private Timer? _fileCheckTimer;
-        private Timer? _clipboardPollTimer;
         private bool _probing = false;
         private string? _lastConnectedIp = null;
 
         public event Action<string>? StatusChanged;
 
-        public NetworkMonitor(ClipboardSyncEngine syncEngine, FileDownloader fileDownloader, FileUploader fileUploader)
+        public NetworkMonitor(ClipboardSyncEngine syncEngine)
         {
             _syncEngine = syncEngine;
-            _fileDownloader = fileDownloader;
-            _fileUploader = fileUploader;
         }
 
         public void Start()
@@ -83,8 +77,6 @@ namespace WindowsAgent
         {
             NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
             _retryTimer?.Dispose();
-            _fileCheckTimer?.Dispose();
-            _clipboardPollTimer?.Dispose();
         }
 
         private void OnNetworkChanged(object? sender, EventArgs e)
@@ -107,12 +99,6 @@ namespace WindowsAgent
             }
 
             _probing = true;
-
-            // If WebSocket dropped, clean up timers
-            _fileCheckTimer?.Dispose();
-            _fileCheckTimer = null;
-            _clipboardPollTimer?.Dispose();
-            _clipboardPollTimer = null;
 
             try
             {
@@ -189,8 +175,8 @@ namespace WindowsAgent
 
                 // Update the sync engine and file transfer endpoints with the discovered IP
                 _syncEngine.UpdateEndpoint(ip, SignalingPort);
-                _fileDownloader.UpdateEndpoint(ip, SignalingPort);
-                _fileUploader.UpdateEndpoint(ip, SignalingPort);
+                App.FileDownloader.UpdateEndpoint(ip, SignalingPort);
+                App.FileUploader.UpdateEndpoint(ip, SignalingPort);
                 _lastConnectedIp = ip;
 
                 // Establish WebSocket
@@ -198,24 +184,6 @@ namespace WindowsAgent
 
                 if (_syncEngine.IsConnected)
                 {
-                    // Start polling for file transfers every 5 seconds
-                    _fileCheckTimer?.Dispose();
-                    _fileCheckTimer = new Timer(
-                        async _ => await _fileDownloader.CheckAndDownloadAsync(),
-                        null,
-                        TimeSpan.FromSeconds(2),
-                        TimeSpan.FromSeconds(5));
-
-                    // Start polling for clipboard changes every 3 seconds
-                    // This is the primary Android→Windows sync path because Android 10+
-                    // restricts clipboard reading from background services.
-                    _clipboardPollTimer?.Dispose();
-                    _clipboardPollTimer = new Timer(
-                        async _ => await _syncEngine.PollClipboardAsync(),
-                        null,
-                        TimeSpan.FromSeconds(2),
-                        TimeSpan.FromSeconds(3));
-
                     StatusChanged?.Invoke($"Connected ✓  ({ip})");
                     return true;
                 }

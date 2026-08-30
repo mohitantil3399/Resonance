@@ -22,7 +22,8 @@ public partial class App : Application
     public static ClipboardSyncEngine SyncEngine { get; } = new ClipboardSyncEngine(Database);
     public static FileDownloader FileDownloader { get; } = new FileDownloader(StorageSettings, Database);
     public static FileUploader FileUploader { get; } = new FileUploader(Database);
-    public static NetworkMonitor Monitor { get; } = new NetworkMonitor(SyncEngine, FileDownloader, FileUploader);
+    public static NotificationEngine NotificationEngine { get; } = new NotificationEngine(SyncEngine);
+    public static NetworkMonitor Monitor { get; } = new NetworkMonitor(SyncEngine);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -49,6 +50,10 @@ public partial class App : Application
         {
             _ = FileDownloader.CheckAndDownloadAsync();
         };
+
+        // Wire notification mirroring events
+        SyncEngine.NotificationReceived += json => NotificationEngine.HandleNotification(json);
+        SyncEngine.NotificationDismissed += json => NotificationEngine.HandleDismissal(json);
 
         // Start IPC server to receive files from right-click context menu
         ShellIntegration.StartIpcServer(files =>
@@ -78,6 +83,7 @@ public partial class App : Application
         _ipcCancel.Cancel();
         Monitor.Stop();
         _ = SyncEngine.DisconnectAsync();
+        NotificationEngine.Cleanup();
         _instanceMutex?.ReleaseMutex();
         base.OnExit(e);
     }
