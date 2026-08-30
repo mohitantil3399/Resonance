@@ -469,8 +469,9 @@ class SyncForegroundService : Service() {
             "notification_action" -> {
                 val notifKey = jsonObj.get("key")?.asString ?: return
                 val actionIndex = jsonObj.get("actionIndex")?.asInt ?: 0
-                val success = DeviceSyncNotificationListener.executeAction(notifKey, actionIndex)
-                Log.d(TAG, "notification_action executed for key=$notifKey, index=$actionIndex, success=$success")
+                val replyText = jsonObj.get("replyText")?.asString
+                val success = DeviceSyncNotificationListener.executeAction(notifKey, actionIndex, replyText)
+                Log.d(TAG, "notification_action executed for key=$notifKey, index=$actionIndex, replyText=$replyText, success=$success")
             }
 
             // ── WebRTC signaling (Phase 3d placeholder) ──

@@ -39,23 +39,40 @@ namespace WindowsAgent
             {
                 var args = ToastArguments.Parse(toastArgs.Argument);
 
-                if (args.Contains("action") && args["action"] == "notification_action")
+                if (args.Contains("action"))
                 {
+                    var actionType = args["action"];
                     var notifKey = args.Contains("notifKey") ? args["notifKey"] : "";
                     var actionIndex = args.Contains("actionIndex") ? args["actionIndex"] : "0";
 
-                    Debug.WriteLine($"NotificationEngine: Action clicked — key={notifKey}, index={actionIndex}");
-
-                    // Send notification_action back to Android
-                    var payload = JsonConvert.SerializeObject(new
+                    if (actionType == "notification_reply")
                     {
-                        type = "notification_action",
-                        key = notifKey,
-                        actionIndex = int.TryParse(actionIndex, out var idx) ? idx : 0
-                    });
+                        var replyText = toastArgs.UserInput.TryGetValue("replyText", out var userInputText) ? userInputText?.ToString() : "";
+                        Debug.WriteLine($"NotificationEngine: Inline reply — key={notifKey}, index={actionIndex}, text={replyText}");
 
-                    // Fire-and-forget send back to Android
-                    _ = _syncEngine.SendEncryptedAsync(payload);
+                        var payload = JsonConvert.SerializeObject(new
+                        {
+                            type = "notification_action",
+                            key = notifKey,
+                            actionIndex = int.TryParse(actionIndex, out var idx) ? idx : 0,
+                            replyText = replyText
+                        });
+
+                        _ = _syncEngine.SendEncryptedAsync(payload);
+                    }
+                    else if (actionType == "notification_action")
+                    {
+                        Debug.WriteLine($"NotificationEngine: Action clicked — key={notifKey}, index={actionIndex}");
+
+                        var payload = JsonConvert.SerializeObject(new
+                        {
+                            type = "notification_action",
+                            key = notifKey,
+                            actionIndex = int.TryParse(actionIndex, out var idx) ? idx : 0
+                        });
+
+                        _ = _syncEngine.SendEncryptedAsync(payload);
+                    }
                 }
             };
         }
@@ -82,7 +99,8 @@ namespace WindowsAgent
                 var appName = obj["appName"]?.ToString() ?? packageName;
                 var title = obj["title"]?.ToString() ?? "";
                 var text = obj["text"]?.ToString() ?? "";
-                var isCall = obj["isCall"]?.ToObject<bool>() ?? false;
+                var isIncomingCall = obj["isIncomingCall"]?.ToObject<bool>() ?? obj["isCall"]?.ToObject<bool>() ?? false;
+                var isMissedCall = obj["isMissedCall"]?.ToObject<bool>() ?? false;
                 var category = obj["category"]?.ToString() ?? "";
                 var actionsArr = obj["actions"] as JArray;
 
@@ -94,9 +112,9 @@ namespace WindowsAgent
                 {
                     Key = key,
                     AppName = appName,
-                    Title = title,
+                    Title = isMissedCall ? $"Missed Call: {title}" : title,
                     Text = text,
-                    IsCall = isCall,
+                    IsCall = isIncomingCall,
                     Time = DateTime.Now.ToString("HH:mm:ss"),
                     PackageName = packageName
                 };
@@ -108,9 +126,13 @@ namespace WindowsAgent
                 NotificationLogUpdated?.Invoke();
 
                 // Build toast notification
-                if (isCall)
+                if (isIncomingCall)
                 {
                     ShowCallToast(key, appName, title, text, actionsArr);
+                }
+                else if (isMissedCall)
+                {
+                    ShowMissedCallToast(key, appName, title, text, actionsArr);
                 }
                 else
                 {
@@ -163,7 +185,68 @@ namespace WindowsAgent
                 builder.AddText(text);
             }
 
-            // Add action buttons (max 3 per toast)
+            // Check if any action supports reply
+            if (actions != null)
+            {
+                JToken? replyAction = null;
+                foreach (var action in actions)
+                {
+                    if (action["isReply"]?.ToObject<bool>() == true)
+                    {
+                        replyAction = action;
+                        break;
+                    }
+                }
+
+                if (replyAction != null)
+                {
+                    var replyIndex = replyAction["index"]?.ToObject<int>() ?? 0;
+                    builder.AddInputTextBox("replyText", "Type a reply...");
+                    builder.AddButton(new ToastButton()
+                        .SetContent("Send")
+                        .AddArgument("action", "notification_reply")
+                        .AddArgument("notifKey", key)
+                        .AddArgument("actionIndex", replyIndex.ToString())
+                        .SetTextBoxId("replyText"));
+                }
+
+                var count = 0;
+                foreach (var action in actions)
+                {
+                    if (action == replyAction) continue;
+                    if (count >= 2) break; // max remaining buttons
+
+                    var label = action["label"]?.ToString() ?? $"Action {count}";
+                    var index = action["index"]?.ToObject<int>() ?? count;
+
+                    builder.AddButton(new ToastButton()
+                        .SetContent(label)
+                        .AddArgument("action", "notification_action")
+                        .AddArgument("notifKey", key)
+                        .AddArgument("actionIndex", index.ToString()));
+                    count++;
+                }
+            }
+
+            builder.Show(toast =>
+            {
+                toast.Tag = key;
+                toast.Group = "devicesync";
+            });
+        }
+
+        private void ShowMissedCallToast(string key, string appName, string callerName, string text, JArray? actions)
+        {
+            var builder = new ToastContentBuilder()
+                .AddArgument("notifKey", key)
+                .AddText($"📞 Missed Call")
+                .AddText(string.IsNullOrEmpty(callerName) ? "Unknown Caller" : callerName);
+
+            if (!string.IsNullOrEmpty(text) && text != callerName)
+            {
+                builder.AddText(text);
+            }
+
             if (actions != null)
             {
                 var count = 0;
