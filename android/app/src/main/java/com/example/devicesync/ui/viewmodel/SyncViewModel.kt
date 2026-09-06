@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devicesync.ClipboardPayload
 import com.example.devicesync.FileTransferManager
+import com.example.devicesync.FormatUtils
 import com.example.devicesync.SyncForegroundService
 import com.example.devicesync.data.*
 import com.google.gson.Gson
@@ -138,7 +139,7 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
             val transfers = FileTransferManager.registerTransfers(getApplication(), uris)
             if (transfers.isNotEmpty()) {
                 val sizeTotal = transfers.sumOf { it.size }
-                val formatted = formatSize(sizeTotal)
+                val formatted = FormatUtils.formatBytes(sizeTotal)
                 showStatus("Sent ${transfers.size} file(s) ($formatted) ⚡")
                 selectedTabIndex = 1 // Switch to transfers tab to view progress
             } else {
@@ -191,10 +192,4 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun formatSize(bytes: Long): String {
-        if (bytes <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB")
-        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, 3)
-        return String.format(java.util.Locale.US, "%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
-    }
 }

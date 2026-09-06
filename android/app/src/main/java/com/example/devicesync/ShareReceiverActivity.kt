@@ -137,7 +137,7 @@ class ShareReceiverActivity : ComponentActivity() {
             val transfers = FileTransferManager.registerTransfers(applicationContext, uris)
             val count = transfers.size
             val sizeSum = transfers.sumOf { it.size }
-            val formattedSize = formatFileSize(sizeSum)
+            val formattedSize = FormatUtils.formatBytes(sizeSum)
             val names = transfers.take(2).joinToString(", ") { it.fileName } +
                     if (transfers.size > 2) " and ${transfers.size - 2} more" else ""
 
@@ -152,12 +152,6 @@ class ShareReceiverActivity : ComponentActivity() {
         return ShareResult(false, "Unsupported Content", "Could not process shared item")
     }
 
-    private fun formatFileSize(bytes: Long): String {
-        if (bytes <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB")
-        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, 3)
-        return String.format(java.util.Locale.US, "%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
-    }
 }
 
 @Composable

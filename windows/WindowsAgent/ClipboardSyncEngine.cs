@@ -49,16 +49,6 @@ namespace WindowsAgent
         public event Action? FilesAvailableReceived;
 
         /// <summary>
-        /// Fired when a WebRTC signaling message is received (offer/answer/ice).
-        /// </summary>
-        public event Action<string, string>? WebRtcSignalingReceived; // (type, json)
-
-        /// <summary>
-        /// Fired when a screen share lifecycle message is received.
-        /// </summary>
-        public event Action<string>? ScreenShareLifecycleReceived;
-
-        /// <summary>
         /// Whether the ECDHE key exchange has completed for this session.
         /// </summary>
         public bool IsEncrypted => _crypto.IsEstablished;
@@ -337,19 +327,6 @@ namespace WindowsAgent
                         FilesAvailableReceived?.Invoke();
                         break;
 
-                    // ── WebRTC signaling (Phase 3d) ──
-                    case "webrtc_offer":
-                    case "webrtc_answer":
-                    case "webrtc_ice":
-                        WebRtcSignalingReceived?.Invoke(type, json);
-                        break;
-
-                    // ── Screen share lifecycle (Phase 3d) ──
-                    case "screen_share_start":
-                    case "screen_share_stop":
-                        ScreenShareLifecycleReceived?.Invoke(type);
-                        break;
-
                     default:
                         Debug.WriteLine($"Unknown message type: {type}");
                         break;
@@ -388,8 +365,6 @@ namespace WindowsAgent
                 StatusChanged?.Invoke($"Received: {content[..Math.Min(content.Length, 30)]}...");
             });
         }
-
-
 
         /// <summary>
         /// Sets clipboard text with retry logic. The Windows clipboard can throw
@@ -448,37 +423,6 @@ namespace WindowsAgent
             }
         }
 
-        /// <summary>
-        /// Send an encrypted JSON payload. If key exchange is not complete, sends unencrypted.
-        /// </summary>
-        public async Task SendEncryptedAsync(string json)
-        {
-            if (_crypto.IsEstablished)
-            {
-                var encrypted = _crypto.Encrypt(json);
-                var envelope = JsonConvert.SerializeObject(new { type = "encrypted", payload = encrypted });
-                await SendRawAsync(envelope);
-            }
-            else
-            {
-                await SendRawAsync(json);
-            }
-        }
-    }
-
-    /// <summary>
-    /// JSON payload for clipboard sync messages (WebSocket).
-    /// </summary>
-    public class ClipboardPayload
-    {
-        [JsonProperty("clipboardId")]
-        public string? ClipboardId { get; set; }
-
-        [JsonProperty("source")]
-        public string? Source { get; set; }
-
-        [JsonProperty("content")]
-        public string? Content { get; set; }
     }
 }
 

@@ -31,7 +31,7 @@ import io.ktor.server.websocket.*
 import io.ktor.utils.io.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
+
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import com.google.gson.JsonParser
@@ -155,7 +155,6 @@ class SyncForegroundService : Service() {
 
         startSignalingServer()
         startClipboardListener()
-        startClipboardBroadcaster()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -463,18 +462,6 @@ class SyncForegroundService : Service() {
                 Log.d(TAG, "Ignoring inbound files_available")
             }
 
-            // ── WebRTC signaling (Phase 3d placeholder) ──
-            "webrtc_offer", "webrtc_answer", "webrtc_ice" -> {
-                Log.d(TAG, "WebRTC signaling received: $type (handler pending Phase 3d)")
-                // TODO: Phase 3d — forward to ScreenShareManager
-            }
-
-            // ── Screen share lifecycle (Phase 3d placeholder) ──
-            "screen_share_start", "screen_share_stop" -> {
-                Log.d(TAG, "Screen share lifecycle: $type (handler pending Phase 3d)")
-                // TODO: Phase 3d — forward to ScreenShareManager
-            }
-
             // ── Legacy/untyped — treat as clipboard payload for backward compat ──
             null -> {
                 val payload = gson.fromJson(rawJson, ClipboardPayload::class.java)
@@ -552,14 +539,6 @@ class SyncForegroundService : Service() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in clipboard listener", e)
                 }
-            }
-        }
-    }
-
-    private fun startClipboardBroadcaster() {
-        serviceScope.launch {
-            clipboardRepo.getAllItems().collectLatest { items ->
-                Log.d(TAG, "Clipboard journal updated: ${items.size} items")
             }
         }
     }
