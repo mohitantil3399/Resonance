@@ -165,6 +165,7 @@ namespace WindowsAgent
             {
                 var payload = new
                 {
+                    type = "clipboard",
                     clipboardId,
                     source = "windows",
                     content = text
@@ -329,9 +330,17 @@ namespace WindowsAgent
                         }
                         break;
 
-                    // ── Clipboard (typed) ──
+                    // ── Clipboard (typed or untyped legacy) ──
                     case "clipboard":
-                        HandleClipboardPayload(obj);
+                    case null:
+                        if (obj["content"] != null || obj["clipboardId"] != null)
+                        {
+                            HandleClipboardPayload(obj);
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"Unknown message type: {type}");
+                        }
                         break;
 
                     // ── File transfer notification ──
@@ -374,15 +383,16 @@ namespace WindowsAgent
         }
 
         /// <summary>
-        /// Handle a typed clipboard message (has "type":"clipboard").
+        /// Handle a clipboard message (typed or untyped legacy).
         /// </summary>
         private void HandleClipboardPayload(JObject obj)
         {
-            var clipboardId = obj["clipboardId"]?.ToString();
-            var source = obj["source"]?.ToString();
             var content = obj["content"]?.ToString();
+            if (content == null) return;
 
-            if (clipboardId == null || source == null || content == null) return;
+            var clipboardId = obj["clipboardId"]?.ToString() ?? Guid.NewGuid().ToString();
+            var source = obj["source"]?.ToString() ?? "android";
+
             if (source == "windows") return;
             if (_db.ExistsById(clipboardId)) return;
 
@@ -412,7 +422,14 @@ namespace WindowsAgent
             {
                 try
                 {
-                    Clipboard.SetText(text);
+                    if (string.IsNullOrEmpty(text))
+                    {
+                        Clipboard.Clear();
+                    }
+                    else
+                    {
+                        Clipboard.SetText(text);
+                    }
                     return; // success
                 }
                 catch (Exception ex)

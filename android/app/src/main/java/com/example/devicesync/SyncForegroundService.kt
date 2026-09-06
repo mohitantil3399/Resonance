@@ -648,5 +648,6 @@ class SyncForegroundService : Service() {
 data class ClipboardPayload(
     val clipboardId: String? = null,
     val source: String? = null,
-    val content: String? = null
+    val content: String? = null,
+    val type: String = "clipboard"
 )
