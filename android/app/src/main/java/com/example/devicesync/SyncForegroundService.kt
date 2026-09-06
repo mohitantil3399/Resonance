@@ -19,7 +19,6 @@ import com.example.devicesync.data.ClipboardRepository
 import com.example.devicesync.data.StoragePreferences
 import com.example.devicesync.data.SyncDatabase
 import com.example.devicesync.data.TransferRepository
-import com.example.devicesync.notifications.DeviceSyncNotificationListener
 import com.google.gson.Gson
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -123,7 +122,7 @@ class SyncForegroundService : Service() {
             }
         }
 
-        /** Get the crypto instance for a specific session (for notification/screen share engines) */
+        /** Get the crypto instance for a specific session */
         fun getCryptoForSession(sessionId: String): SessionCrypto? {
             return _connectedClients[sessionId]?.crypto
         }
@@ -189,8 +188,7 @@ class SyncForegroundService : Service() {
                                         "device" to (Build.MODEL ?: "android"),
                                         "protocol" to "2.0",
                                         "features" to listOf(
-                                            "clipboard", "file_transfer", "file_upload",
-                                            "notification_mirror", "screen_share", "e2ee"
+                                            "clipboard", "file_transfer", "file_upload", "e2ee"
                                         )
                                     )
                                 ),
@@ -463,15 +461,6 @@ class SyncForegroundService : Service() {
             "files_available" -> {
                 // This is outbound-only from Android; ignore if received
                 Log.d(TAG, "Ignoring inbound files_available")
-            }
-
-            // ── Notification action from Windows ──
-            "notification_action" -> {
-                val notifKey = jsonObj.get("key")?.asString ?: return
-                val actionIndex = jsonObj.get("actionIndex")?.asInt ?: 0
-                val replyText = jsonObj.get("replyText")?.asString
-                val success = DeviceSyncNotificationListener.executeAction(notifKey, actionIndex, replyText)
-                Log.d(TAG, "notification_action executed for key=$notifKey, index=$actionIndex, replyText=$replyText, success=$success")
             }
 
             // ── WebRTC signaling (Phase 3d placeholder) ──

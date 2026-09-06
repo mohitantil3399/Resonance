@@ -113,13 +113,6 @@ fun ModeTabSelector(
             selectedContentColor = SyncColors.Mauve,
             unselectedContentColor = SyncColors.Subtext
         )
-        Tab(
-            selected = selectedIndex == 2,
-            onClick = { onTabSelected(2) },
-            text = { Text("🔔 Notifs", fontWeight = FontWeight.SemiBold, fontSize = 13.sp) },
-            selectedContentColor = SyncColors.Mauve,
-            unselectedContentColor = SyncColors.Subtext
-        )
     }
 }
 

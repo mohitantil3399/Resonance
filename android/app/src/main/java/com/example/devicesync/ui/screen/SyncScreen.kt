@@ -12,10 +12,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -27,7 +23,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.devicesync.data.TransferItem
-import com.example.devicesync.notifications.DeviceSyncNotificationListener
 import com.example.devicesync.ui.components.*
 import com.example.devicesync.ui.viewmodel.SyncViewModel
 
@@ -244,12 +239,6 @@ fun SyncScreen(viewModel: SyncViewModel) {
                         item { TransferEmptyState() }
                     }
                 }
-            } else if (viewModel.selectedTabIndex == 2) {
-                // ══════════════════════════════════════════════════════════
-                // 🔔 NOTIFICATIONS VIEW
-                // ══════════════════════════════════════════════════════════
-
-                NotificationSettingsView(viewModel = viewModel)
             }
         }
     }
@@ -266,170 +255,5 @@ private fun openFile(context: Context, item: TransferItem) {
         context.startActivity(viewIntent)
     } catch (e: Exception) {
         Log.e("SyncScreen", "Unable to open file ${item.fileName}", e)
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// 🔔 NOTIFICATION SETTINGS VIEW
-// ═══════════════════════════════════════════════════════════════════════
-
-@Composable
-fun NotificationSettingsView(viewModel: SyncViewModel) {
-    val context = LocalContext.current
-    val isListenerEnabled = DeviceSyncNotificationListener.isEnabled(context)
-    val isMirroringOn = viewModel.notificationMirroringEnabled
-
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // ── Status Card ──
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = SyncColors.Surface0,
-            tonalElevation = 2.dp
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (isListenerEnabled && isMirroringOn)
-                            Icons.Default.NotificationsActive
-                        else
-                            Icons.Default.Notifications,
-                        contentDescription = "Notifications",
-                        tint = if (isListenerEnabled && isMirroringOn)
-                            SyncColors.Green else SyncColors.Overlay
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Notification Mirroring",
-                            color = SyncColors.Text,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Text(
-                            text = if (isListenerEnabled && isMirroringOn)
-                                "Active — notifications forwarding to Windows"
-                            else if (!isListenerEnabled)
-                                "Notification access not granted"
-                            else
-                                "Mirroring paused",
-                            color = SyncColors.Overlay,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── Notification Access Permission ──
-        if (!isListenerEnabled) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = SyncColors.Surface1,
-                tonalElevation = 1.dp
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "⚠️ Grant Notification Access",
-                        color = SyncColors.Peach,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "DeviceSync needs permission to read your notifications " +
-                                "so it can mirror them to your PC. Tap below to open Settings.",
-                        color = SyncColors.Subtext,
-                        fontSize = 12.sp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = { DeviceSyncNotificationListener.requestAccess(context) },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SyncColors.Mauve)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = null,
-                            tint = SyncColors.Base
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Open Notification Settings",
-                            color = SyncColors.Base,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── Mirroring Toggle ──
-        if (isListenerEnabled) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = SyncColors.Surface0,
-                tonalElevation = 2.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Enable Mirroring",
-                            color = SyncColors.Text,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "Forward notifications to Windows PC",
-                            color = SyncColors.Overlay,
-                            fontSize = 12.sp
-                        )
-                    }
-                    Switch(
-                        checked = isMirroringOn,
-                        onCheckedChange = { viewModel.setNotificationMirroring(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = SyncColors.Base,
-                            checkedTrackColor = SyncColors.Green,
-                            uncheckedThumbColor = SyncColors.Overlay,
-                            uncheckedTrackColor = SyncColors.Surface1
-                        )
-                    )
-                }
-            }
-        }
-
-        // ── Info Card ──
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = SyncColors.Surface0,
-            tonalElevation = 1.dp
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "ℹ️ How it works",
-                    color = SyncColors.Blue,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "• WhatsApp, SMS, and app notifications appear as Windows toasts\n" +
-                            "• Incoming calls show Answer/Decline buttons on your PC\n" +
-                            "• Notifications are session-only — cleared when you disconnect\n" +
-                            "• All data is encrypted with AES-256-GCM",
-                    color = SyncColors.Subtext,
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp
-                )
-            }
-        }
     }
 }

@@ -49,17 +49,6 @@ namespace WindowsAgent
         public event Action? FilesAvailableReceived;
 
         /// <summary>
-        /// Fired when a notification message is received from Android.
-        /// The string payload is the raw JSON of the notification.
-        /// </summary>
-        public event Action<string>? NotificationReceived;
-
-        /// <summary>
-        /// Fired when a notification dismissal is received from Android.
-        /// </summary>
-        public event Action<string>? NotificationDismissed;
-
-        /// <summary>
         /// Fired when a WebRTC signaling message is received (offer/answer/ice).
         /// </summary>
         public event Action<string, string>? WebRtcSignalingReceived; // (type, json)
@@ -348,16 +337,6 @@ namespace WindowsAgent
                         FilesAvailableReceived?.Invoke();
                         break;
 
-                    // ── Notification mirroring (Phase 3b) ──
-                    case "notification":
-                        NotificationReceived?.Invoke(json);
-                        break;
-
-                    // ── Notification dismissed (Phase 3b) ──
-                    case "notification_dismissed":
-                        NotificationDismissed?.Invoke(json);
-                        break;
-
                     // ── WebRTC signaling (Phase 3d) ──
                     case "webrtc_offer":
                     case "webrtc_answer":
@@ -449,7 +428,6 @@ namespace WindowsAgent
 
         /// <summary>
         /// Send a raw JSON payload to the Android agent via WebSocket.
-        /// Used by NotificationEngine, ScreenShareEngine, etc.
         /// </summary>
         public async Task SendRawAsync(string json)
         {

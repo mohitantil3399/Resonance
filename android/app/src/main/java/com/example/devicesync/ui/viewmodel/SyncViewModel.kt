@@ -13,7 +13,6 @@ import com.example.devicesync.ClipboardPayload
 import com.example.devicesync.FileTransferManager
 import com.example.devicesync.SyncForegroundService
 import com.example.devicesync.data.*
-import com.example.devicesync.notifications.DeviceSyncNotificationListener
 import com.google.gson.Gson
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -65,12 +64,8 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
     var storagePathDescription by mutableStateOf(StoragePreferences.getStoragePathDescription(application))
         private set
 
-    /** Active tab index: 0 = Clipboard, 1 = File Transfers, 2 = Notifications */
+    /** Active tab index: 0 = Clipboard, 1 = File Transfers */
     var selectedTabIndex by mutableIntStateOf(0)
-        private set
-
-    /** Whether notification mirroring is enabled */
-    var notificationMirroringEnabled by mutableStateOf(DeviceSyncNotificationListener.mirroringEnabled)
         private set
 
     /** Pairing request from a new Windows client */
@@ -90,14 +85,6 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setTabIndex(index: Int) {
         selectedTabIndex = index
-    }
-
-    // ── Notification mirroring actions ───────────────────────────────────
-
-    fun setNotificationMirroring(enabled: Boolean) {
-        notificationMirroringEnabled = enabled
-        DeviceSyncNotificationListener.mirroringEnabled = enabled
-        showStatus(if (enabled) "🔔 Notification mirroring enabled" else "🔔 Notification mirroring paused")
     }
 
     // ── Clipboard actions ───────────────────────────────────────────────
