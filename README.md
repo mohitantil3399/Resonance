@@ -1,6 +1,6 @@
 # DeviceSync ⚡ (Resonance)
 
-DeviceSync (Resonance) is a high-performance, zero-cloud local network synchronization and media beaming tool. It seamlessly mirrors clipboard items, streams **photos, videos, and documents**, forwards **phone notifications with inline reply**, and provides **call intercept** between your Android device and Windows PC over a local Wi-Fi hotspot.
+DeviceSync (Resonance) is a high-performance, zero-cloud local network synchronization and media beaming tool. It seamlessly mirrors clipboard items and streams **photos, videos, and documents** between your Android device and Windows PC over a local Wi-Fi hotspot — with full end-to-end encryption and zero cloud dependency.
 
 ---
 
@@ -25,11 +25,7 @@ DeviceSync (Resonance) is a high-performance, zero-cloud local network synchroni
   - **Zero-Permission Media Categorization & Custom Paths**:
     - **Android**: Automatically places photos in `Pictures/SyncDevice` (instantly visible in Gallery), videos in `Movies/SyncDevice`, and docs in `Download/SyncDevice`. Custom storage trees selectable via Storage Access Framework.
     - **Windows**: Customizable download folder (defaults to `~/Downloads/SyncDevice`) with quick explorer launcher.
-- **🔔 Notification Mirroring & Call Intercept**:
-  - **Live Notifications**: Phone notifications (WhatsApp, Telegram, SMS, System) mirrored as native **Windows 11 toast notifications**.
-  - **Rich Messaging Support**: Full `MessagingStyle` extraction for conversation titles, senders, and message bodies.
-  - **Inline Quick Replies**: Reply directly to WhatsApp/SMS messages from the Windows notification toast.
-  - **📞 Call Intercept**: Incoming calls ring on Windows with **Answer** and **Decline** actions. Missed calls display as standard non-ringing alert cards.
+
 - **🎨 Catppuccin Mocha Aesthetics**: Elegant dark-mode UI with dual tabs, live linear progress bars, and activity journals.
 
 ---
@@ -42,7 +38,6 @@ DeviceSync (Resonance) is a high-performance, zero-cloud local network synchroni
 | **UI Framework** | Jetpack Compose (Material 3) | Modern WPF with Catppuccin Mocha theme |
 | **Signaling & Server** | Ktor Server 3.1 (Netty Engine) | `System.Net.WebSockets` & `HttpClient` |
 | **Cryptography** | `java.security` (ECDHE P-256 + AES-256-GCM) | `System.Security.Cryptography` (ECDHE + AesGcm) |
-| **Notifications** | `NotificationListenerService` + `RemoteInput` | `Microsoft.Toolkit.Uwp.Notifications` (Win11 Toast) |
 | **Local Storage** | Room Database (SQLite) + MediaStore Scoped Storage | `Microsoft.Data.Sqlite` |
 | **OS Integration** | Android Share Sheet (`ACTION_SEND`, `ACTION_SEND_MULTIPLE`) | Named Pipe IPC, Win32 Clipboard Listener, Shell `SendTo` |
 
@@ -64,7 +59,6 @@ DeviceSync (Resonance) is a high-performance, zero-cloud local network synchroni
 2. Connect your Android phone via USB with USB Debugging enabled.
 3. Click **Run ▶** (or run `./gradlew assembleDebug` and install `app-debug.apk` via `adb install -r`).
 4. On your phone:
-   - Grant **Notification Access** when prompted (required for notification mirroring).
    - Turn off battery optimization / allow background activity for uninterrupted background sync.
 
 ---
@@ -107,13 +101,12 @@ Then launch `./publish/WindowsAgent.exe`.
    - **Clipboard**: Copy text anywhere on either device — it syncs automatically.
    - **Send Files from Phone**: Select items in any app ➔ Tap **Share** ➔ **Send to PC (DeviceSync)**.
    - **Send Files from Windows**: Drag & drop files onto the app window or right-click any file in File Explorer ➔ **Send to** ➔ **Send to Android**.
-   - **Notifications & Calls**: Manage WhatsApp replies and incoming calls directly from your PC toast notifications.
 
 ---
 
 ## 📜 Version History
 
-- **v3.0**: Notification Mirroring with rich `MessagingStyle` (WhatsApp/Telegram), Call Intercept (Answer/Decline), Windows toast inline quick replies, and ECDHE P-256 + AES-256-GCM End-to-End Encryption.
+- **v3.0**: ECDHE P-256 + AES-256-GCM End-to-End Encryption with device pairing approval on Android.
 - **v2.5**: Bidirectional media & document transfers (Android Share Sheet, in-app pickers, Windows drag & drop, and Explorer context menu integration).
 - **v2.0**: Jetpack Compose UI rewrite with Clean Architecture and dynamic hotspot discovery.
 - **v1.0**: Initial prototype.
