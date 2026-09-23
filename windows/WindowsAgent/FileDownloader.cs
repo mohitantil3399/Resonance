@@ -62,7 +62,7 @@ namespace WindowsAgent
 
                     _downloadedTokens.Add(transfer.Token);
                     StatusChanged?.Invoke($"Downloading: {transfer.FileName}...");
-                    await DownloadFileAsync(transfer);
+                    await DownloadSingleFileAsync(transfer);
                 }
             }
             catch (Exception ex)
@@ -71,7 +71,12 @@ namespace WindowsAgent
             }
         }
 
-        private async Task DownloadFileAsync(TransferInfo info)
+        /// <summary>
+        /// Download a single transfer. Used by TransferQueue for per-item progress.
+        /// </summary>
+        public async Task<bool> DownloadSingleFileAsync(
+            TransferInfo info,
+            Action<long, long>? onProgress = null)
         {
             try
             {
@@ -80,7 +85,7 @@ namespace WindowsAgent
 
                 var filePath = Path.Combine(downloadFolder, info.FileName);
 
-                // Handle duplicate name collisions (e.g. photo (1).jpg)
+                // Handle duplicate name collisions
                 var counter = 1;
                 var baseName = Path.GetFileNameWithoutExtension(info.FileName);
                 var extension = Path.GetExtension(info.FileName);
@@ -97,7 +102,6 @@ namespace WindowsAgent
                 }
 
                 using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-
                 response.EnsureSuccessStatusCode();
 
                 using var stream = await response.Content.ReadAsStreamAsync();
@@ -115,6 +119,7 @@ namespace WindowsAgent
                     if (info.Size > 0)
                     {
                         var percent = (int)((totalRead * 100) / info.Size);
+                        onProgress?.Invoke(totalRead, info.Size);
                         DownloadProgressChanged?.Invoke(info.FileName, percent, totalRead, info.Size);
                         StatusChanged?.Invoke($"Downloading {info.FileName}: {percent}%");
                     }
@@ -143,20 +148,21 @@ namespace WindowsAgent
                     var deleteUrl = $"http://{_hotspotIp}:{_signalingPort}/transfer/{info.Token}";
                     using var deleteReq = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
                     if (!string.IsNullOrEmpty(App.SyncEngine.SessionToken))
-                    {
                         deleteReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
-                    }
                     _ = await _client.SendAsync(deleteReq);
                 }
                 catch (Exception delEx)
                 {
                     Debug.WriteLine($"FileDownloader: Failed to notify Android of transfer completion: {delEx.Message}");
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
                 StatusChanged?.Invoke($"Download failed: {info.FileName}");
                 Debug.WriteLine($"FileDownloader: Download error: {ex}");
+                return false;
             }
         }
     }

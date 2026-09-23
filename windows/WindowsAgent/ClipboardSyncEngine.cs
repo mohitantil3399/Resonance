@@ -28,6 +28,7 @@ namespace WindowsAgent
         private readonly SessionCrypto _crypto = new();
         private ClientWebSocket? _webSocket;
         private CancellationTokenSource? _wsCancellation;
+        private Timer? _heartbeatTimer;
 
         /// <summary>
         /// Called by NetworkMonitor once the Android agent IP is discovered.
@@ -91,6 +92,14 @@ namespace WindowsAgent
 
                 // Start listening for incoming messages
                 _ = Task.Run(() => ReceiveLoopAsync(_wsCancellation.Token));
+
+                // Keep-alive heartbeat: sends a ping every 30s so Android's
+                // Netty idle-timeout never closes the connection while minimized.
+                _heartbeatTimer = new Timer(
+                    _ => _ = SendHeartbeatAsync(),
+                    null,
+                    TimeSpan.FromSeconds(30),
+                    TimeSpan.FromSeconds(30));
             }
             catch (Exception ex)
             {
@@ -104,6 +113,8 @@ namespace WindowsAgent
         /// </summary>
         public async Task DisconnectAsync()
         {
+            _heartbeatTimer?.Dispose();
+            _heartbeatTimer = null;
             _wsCancellation?.Cancel();
 
             if (_webSocket?.State == WebSocketState.Open)
@@ -327,6 +338,12 @@ namespace WindowsAgent
                         FilesAvailableReceived?.Invoke();
                         break;
 
+                    // ── Ping/Pong keep-alive ──
+                    case "pong":
+                        // Heartbeat acknowledged — nothing to do
+                        Debug.WriteLine("WebSocket: pong received");
+                        break;
+
                     default:
                         Debug.WriteLine($"Unknown message type: {type}");
                         break;
@@ -400,6 +417,25 @@ namespace WindowsAgent
         /// This prevents the NetworkMonitor from skipping probes on a stale/dead socket.
         /// </summary>
         public bool IsConnected => _webSocket?.State == WebSocketState.Open;
+
+        /// <summary>
+        /// Sends a keep-alive ping to Android to prevent Netty's idle-timeout
+        /// from closing the WebSocket while the window is minimized.
+        /// </summary>
+        private async Task SendHeartbeatAsync()
+        {
+            if (_webSocket?.State != WebSocketState.Open) return;
+            try
+            {
+                var ping = JsonConvert.SerializeObject(new { type = "ping" });
+                await SendRawAsync(ping);
+                Debug.WriteLine("WebSocket: ping sent");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Heartbeat send failed: {ex.Message}");
+            }
+        }
 
         /// <summary>
         /// Send a raw JSON payload to the Android agent via WebSocket.

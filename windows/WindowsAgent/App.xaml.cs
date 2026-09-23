@@ -23,6 +23,7 @@ public partial class App : Application
     public static FileDownloader FileDownloader { get; } = new FileDownloader(StorageSettings, Database);
     public static FileUploader FileUploader { get; } = new FileUploader(Database);
     public static NetworkMonitor Monitor { get; } = new NetworkMonitor(SyncEngine);
+    public static TransferQueue TransferQueue { get; } = new TransferQueue();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -55,21 +56,19 @@ public partial class App : Application
         {
             Dispatcher.Invoke(() =>
             {
-                _ = FileUploader.UploadFilesAsync(files);
+                TransferQueue.EnqueueUploads(files);
             });
         }, _ipcCancel.Token);
 
         // Start network monitor & discovery
         Monitor.Start();
 
-        // Process any files passed at startup
+        // Process any files passed at startup (e.g. right-click SendTo)
         if (e.Args.Length > 0)
         {
             var validFiles = e.Args.Where(File.Exists).ToArray();
             if (validFiles.Length > 0)
-            {
-                _ = FileUploader.UploadFilesAsync(validFiles);
-            }
+                TransferQueue.EnqueueUploads(validFiles);
         }
     }
 

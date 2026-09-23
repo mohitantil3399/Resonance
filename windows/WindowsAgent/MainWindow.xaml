@@ -10,6 +10,7 @@
         Drop="OnWindowDrop">
 
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <Style x:Key="StatusDot" TargetType="Ellipse">
             <Setter Property="Width" Value="10"/>
             <Setter Property="Height" Value="10"/>
@@ -138,15 +139,62 @@
                     Style="{StaticResource TabBtn}" Background="#313244" Click="OnTabTransfersClicked"/>
         </Grid>
 
-        <!-- Active Progress Card (Appears during upload or download) -->
-        <Border x:Name="ProgressCard" Grid.Row="3" Background="#313244" CornerRadius="8" Padding="12" Margin="0,0,0,10" Visibility="Collapsed">
+        <!-- Active Transfers Panel (replaces single ProgressCard) -->
+        <Border x:Name="ActiveTransfersPanel" Grid.Row="3" Background="#313244" CornerRadius="8" Padding="8" Margin="0,0,0,10" Visibility="Collapsed">
             <StackPanel>
-                <Grid>
-                    <TextBlock x:Name="ProgressFileName" Text="Transferring file..." FontSize="12" FontWeight="SemiBold" Foreground="#CDD6F4" HorizontalAlignment="Left"/>
-                    <TextBlock x:Name="ProgressPercentText" Text="0%" FontSize="12" Foreground="#A6E3A1" HorizontalAlignment="Right"/>
-                </Grid>
-                <ProgressBar x:Name="TransferProgressBar" Height="8" Margin="0,8,0,0" Minimum="0" Maximum="100" Value="0"
-                             Foreground="#CBA6F7" Background="#1E1E2E" BorderThickness="0"/>
+                <TextBlock Text="⚡ Active Transfers" FontSize="11" FontWeight="SemiBold" Foreground="#A6ADC8" Margin="2,0,0,4"/>
+                <ListView x:Name="ActiveTransfersList" Background="Transparent" BorderThickness="0"
+                          MaxHeight="140" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListViewItem">
+                                        <ContentPresenter/>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#45475A" CornerRadius="6" Padding="8,6" Margin="0,2">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding DirectionIcon}" FontSize="14" FontWeight="Bold"
+                                               Foreground="#CBA6F7" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding FileName}" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="#CDD6F4" TextTrimming="CharacterEllipsis"/>
+                                        <Grid Margin="0,3,0,0">
+                                            <ProgressBar Height="4" Minimum="0" Maximum="100"
+                                                         Value="{Binding Progress}"
+                                                         Foreground="#CBA6F7" Background="#1E1E2E" BorderThickness="0"/>
+                                        </Grid>
+                                        <TextBlock Text="{Binding ProgressText}" FontSize="9"
+                                                   Foreground="#6C7086" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding StatusDisplay}" FontSize="11"
+                                               Foreground="#A6E3A1" VerticalAlignment="Center" Margin="8,0"/>
+                                    <Button Grid.Column="3" Content="✕" FontSize="10" Padding="4,2"
+                                            Background="Transparent" BorderThickness="0" Foreground="#6C7086"
+                                            Cursor="Hand" VerticalAlignment="Center"
+                                            Click="OnCancelTransferClicked"
+                                            Tag="{Binding Id}"
+                                            Visibility="{Binding IsActive, Converter={StaticResource BoolToVisibility}}"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </StackPanel>
         </Border>
 

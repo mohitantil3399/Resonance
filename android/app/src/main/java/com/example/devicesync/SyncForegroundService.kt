@@ -19,6 +19,8 @@ import com.example.devicesync.data.ClipboardRepository
 import com.example.devicesync.data.StoragePreferences
 import com.example.devicesync.data.SyncDatabase
 import com.example.devicesync.data.TransferRepository
+import com.example.devicesync.data.TrustedDevice
+import com.example.devicesync.data.TrustedDeviceDao
 import com.google.gson.Gson
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -132,6 +134,7 @@ class SyncForegroundService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var clipboardRepo: ClipboardRepository
     private lateinit var transferRepo: TransferRepository
+    private lateinit var trustedDeviceDao: TrustedDeviceDao
     private lateinit var clipboardManager: ClipboardManager
     private val gson = Gson()
 
@@ -151,6 +154,7 @@ class SyncForegroundService : Service() {
         val db = SyncDatabase.getInstance(applicationContext)
         clipboardRepo = ClipboardRepository(db.clipboardDao())
         transferRepo = TransferRepository(db.transferDao())
+        trustedDeviceDao = db.trustedDeviceDao()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         startSignalingServer()
@@ -404,8 +408,7 @@ class SyncForegroundService : Service() {
                 val deviceName = jsonObj.get("deviceName")?.asString ?: "Unknown PC"
                 val clientSession = connectedClients[sessionId] ?: return
 
-                val prefs = getSharedPreferences("trusted_devices", Context.MODE_PRIVATE)
-                val isTrusted = prefs.getBoolean(deviceId, false)
+                val isTrusted = trustedDeviceDao.countById(deviceId) > 0
 
                 if (!isTrusted) {
                     val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
@@ -418,7 +421,14 @@ class SyncForegroundService : Service() {
                         clientSession.session.close(io.ktor.websocket.CloseReason(io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY, "Connection rejected"))
                         return
                     }
-                    prefs.edit().putBoolean(deviceId, true).apply()
+                    // Persist the newly approved device in Room
+                    trustedDeviceDao.insert(
+                        TrustedDevice(
+                            deviceId = deviceId,
+                            deviceName = deviceName,
+                            approvedAt = System.currentTimeMillis()
+                        )
+                    )
                 }
 
                 // Generate our keypair and derive the shared secret
@@ -454,6 +464,14 @@ class SyncForegroundService : Service() {
                 val source = jsonObj.get("source")?.asString ?: return
                 val content = jsonObj.get("content")?.asString ?: return
                 handleClipboardMessage(clipboardId, source, content)
+            }
+
+            // ── Ping / Pong keep-alive ──
+            "ping" -> {
+                val clientSession = connectedClients[sessionId] ?: return
+                val pong = gson.toJson(mapOf("type" to "pong"))
+                clientSession.session.send(Frame.Text(pong))
+                Log.d(TAG, "Ping received from $sessionId — pong sent")
             }
 
             // ── File transfer notification ──

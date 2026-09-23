@@ -16,6 +16,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +40,8 @@ fun SyncScreen(viewModel: SyncViewModel) {
     val clipboardItems by viewModel.clipboardItems.collectAsState()
     val transferItems by viewModel.transferItems.collectAsState()
     val connectionRequest by viewModel.pendingConnectionRequest.collectAsState()
+    val trustedDevices by viewModel.trustedDevices.collectAsState()
+    var showTrustedDevices by remember { mutableStateOf(false) }
 
     // ── Modern Pickers ──
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -148,6 +153,24 @@ fun SyncScreen(viewModel: SyncViewModel) {
                     onClick = { viewModel.readAndSendClipboard(clipboardManager) }
                 )
 
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Trusted Devices button
+                OutlinedButton(
+                    onClick = { showTrustedDevices = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = SyncColors.Mauve
+                    )
+                ) {
+                    Text(
+                        text = "🖥️ Trusted Devices  (${trustedDevices.size})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Paste / type & send card
@@ -241,6 +264,72 @@ fun SyncScreen(viewModel: SyncViewModel) {
                 }
             }
         }
+    }
+
+    // ── Trusted Devices popup ──
+    if (showTrustedDevices) {
+        AlertDialog(
+            onDismissRequest = { showTrustedDevices = false },
+            containerColor = SyncColors.Surface0,
+            title = {
+                Text(
+                    "🖥️ Trusted Windows PCs",
+                    color = SyncColors.Text,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column {
+                    if (trustedDevices.isEmpty()) {
+                        Text(
+                            "No trusted devices yet. Approve a connection from Windows to add one.",
+                            color = SyncColors.Subtext,
+                            fontSize = 13.sp
+                        )
+                    } else {
+                        trustedDevices.forEach { device ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        device.deviceName,
+                                        color = SyncColors.Text,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        "ID: ${device.deviceId.take(8)}…",
+                                        color = SyncColors.Overlay,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { viewModel.revokeTrustedDevice(device.deviceId) }
+                                ) {
+                                    Text(
+                                        "Revoke",
+                                        color = SyncColors.Red,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = SyncColors.Surface0)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTrustedDevices = false }) {
+                    Text("Done", color = SyncColors.Mauve)
+                }
+            }
+        )
     }
 }
 

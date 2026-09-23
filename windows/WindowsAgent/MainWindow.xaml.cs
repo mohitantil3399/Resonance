@@ -27,6 +27,14 @@ public partial class MainWindow : Window
         ClipboardList.ItemsSource = _clipboardItems;
         TransfersList.ItemsSource = _transferItems;
 
+        // Bind active transfers panel to the shared queue
+        ActiveTransfersList.ItemsSource = App.TransferQueue.Items;
+        App.TransferQueue.Items.CollectionChanged += (_, __) =>
+            Dispatcher.Invoke(() =>
+                ActiveTransfersPanel.Visibility =
+                    App.TransferQueue.Items.Any(i => i.IsActive) ? Visibility.Visible : Visibility.Collapsed);
+        App.TransferQueue.StatusChanged += OnStatusChanged;
+
         DownloadPathText.Text = App.StorageSettings.DownloadFolder;
 
         // Wire up clipboard events
@@ -34,13 +42,11 @@ public partial class MainWindow : Window
         App.Monitor.StatusChanged += OnStatusChanged;
         App.SyncEngine.ClipboardReceived += OnClipboardReceived;
 
-        // Wire up file transfer events
+        // Wire up file transfer events (for status bar + history refresh)
         App.FileDownloader.StatusChanged += OnStatusChanged;
-        App.FileDownloader.DownloadProgressChanged += OnProgressChanged;
         App.FileDownloader.FileDownloaded += OnFileTransferCompleted;
 
         App.FileUploader.StatusChanged += OnStatusChanged;
-        App.FileUploader.UploadProgressChanged += OnProgressChanged;
         App.FileUploader.FileUploaded += OnFileTransferCompleted;
 
         App.StorageSettings.DownloadPathChanged += path => Dispatcher.Invoke(() => DownloadPathText.Text = path);
@@ -104,7 +110,7 @@ public partial class MainWindow : Window
         RefreshTransfers();
     }
 
-    private async void OnSelectFilesClicked(object sender, RoutedEventArgs e)
+    private void OnSelectFilesClicked(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
@@ -115,7 +121,7 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) == true && dialog.FileNames.Length > 0)
         {
-            await App.FileUploader.UploadFilesAsync(dialog.FileNames);
+            App.TransferQueue.EnqueueUploads(dialog.FileNames);
         }
     }
 
@@ -184,7 +190,7 @@ public partial class MainWindow : Window
         DropOverlay.Visibility = Visibility.Collapsed;
     }
 
-    private async void OnWindowDrop(object sender, DragEventArgs e)
+    private void OnWindowDrop(object sender, DragEventArgs e)
     {
         DropOverlay.Visibility = Visibility.Collapsed;
         if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -192,31 +198,29 @@ public partial class MainWindow : Window
             var files = (string[]?)e.Data.GetData(DataFormats.FileDrop);
             if (files != null && files.Length > 0)
             {
-                // Switch to transfers view
                 OnTabTransfersClicked(this, new RoutedEventArgs());
-                await App.FileUploader.UploadFilesAsync(files);
+                App.TransferQueue.EnqueueUploads(files);
             }
         }
     }
 
-    // ─── Progress & Event updates ───────────────────────────────────────
+    // ─── Cancel transfer ─────────────────────────────────────────────────
 
-    private void OnProgressChanged(string fileName, int percent, long transferred, long total)
+    private void OnCancelTransferClicked(object sender, RoutedEventArgs e)
     {
-        Dispatcher.Invoke(() =>
-        {
-            ProgressCard.Visibility = Visibility.Visible;
-            ProgressFileName.Text = fileName;
-            ProgressPercentText.Text = $"{percent}% ({FormatBytes(transferred)} / {FormatBytes(total)})";
-            TransferProgressBar.Value = percent;
-        });
+        if (sender is System.Windows.Controls.Button btn && btn.Tag is string id)
+            App.TransferQueue.Cancel(id);
     }
+
+    // ─── Progress & Event updates ─────────────────────────────────────────
 
     private void OnFileTransferCompleted(TransferEntry entry)
     {
         Dispatcher.Invoke(() =>
         {
-            ProgressCard.Visibility = Visibility.Collapsed;
+            // Hide the panel if nothing is actively running
+            if (!App.TransferQueue.Items.Any(i => i.IsActive))
+                ActiveTransfersPanel.Visibility = Visibility.Collapsed;
             RefreshTransfers();
         });
     }

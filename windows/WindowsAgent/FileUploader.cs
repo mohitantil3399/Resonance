@@ -61,8 +61,12 @@ namespace WindowsAgent
 
         /// <summary>
         /// Upload a single file with streaming and progress callback.
+        /// Used directly by TransferQueue for per-item progress.
         /// </summary>
-        public async Task<bool> UploadSingleFileAsync(string filePath, CancellationToken ct = default)
+        public async Task<bool> UploadSingleFileAsync(
+            string filePath,
+            CancellationToken ct = default,
+            Action<long, long>? onProgress = null)
         {
             var fileInfo = new FileInfo(filePath);
             if (!fileInfo.Exists) return false;
@@ -88,6 +92,8 @@ namespace WindowsAgent
                 using var content = new ProgressableStreamContent(fileStream, 64 * 1024, (sent, total) =>
                 {
                     var percent = total > 0 ? (int)((sent * 100) / total) : 0;
+                    // Feed both the queue callback and the legacy UI event
+                    onProgress?.Invoke(sent, total);
                     UploadProgressChanged?.Invoke(fileName, percent, sent, total);
                     StatusChanged?.Invoke($"Sending {fileName}: {percent}%");
                 });

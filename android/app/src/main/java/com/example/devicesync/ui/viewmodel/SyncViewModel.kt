@@ -31,12 +31,14 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
     // ── Dependencies ────────────────────────────────────────────────────
     private val clipboardRepo: ClipboardRepository
     private val transferRepo: TransferRepository
+    private val trustedDeviceDao: TrustedDeviceDao
     private val gson = Gson()
 
     init {
         val db = SyncDatabase.getInstance(application)
         clipboardRepo = ClipboardRepository(db.clipboardDao())
         transferRepo = TransferRepository(db.transferDao())
+        trustedDeviceDao = db.trustedDeviceDao()
     }
 
     // ── Exposed state ───────────────────────────────────────────────────
@@ -47,6 +49,10 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Live file transfer history from Room (newest first) */
     val transferItems: StateFlow<List<TransferItem>> = transferRepo.getAllTransfers()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Live list of trusted Windows devices — shown in the Trusted Devices popup */
+    val trustedDevices: StateFlow<List<TrustedDevice>> = trustedDeviceDao.getAllDevices()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Text currently in the paste text field */
@@ -145,6 +151,15 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 showStatus("Failed to prepare files")
             }
+        }
+    }
+
+    // ── Trusted Devices ──────────────────────────────────────────
+
+    /** Remove a trusted device — next connection from that PC will re-prompt approval. */
+    fun revokeTrustedDevice(deviceId: String) {
+        viewModelScope.launch {
+            trustedDeviceDao.deleteById(deviceId)
         }
     }
 
