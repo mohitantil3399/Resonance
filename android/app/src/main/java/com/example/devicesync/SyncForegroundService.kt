@@ -34,6 +34,10 @@ import io.ktor.utils.io.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import com.google.gson.JsonParser
@@ -145,6 +149,11 @@ class SyncForegroundService : Service() {
     @Volatile
     private var lastSetContent: String? = null
 
+    // Discovery components
+    private var nsdManager: NsdManager? = null
+    private var nsdRegistrationListener: NsdManager.RegistrationListener? = null
+    private var udpSocket: DatagramSocket? = null
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
@@ -158,6 +167,8 @@ class SyncForegroundService : Service() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         startSignalingServer()
+        startUdpBeaconResponder()
+        registerNsdService()
         startClipboardListener()
     }
 
@@ -171,6 +182,79 @@ class SyncForegroundService : Service() {
         super.onDestroy()
         serviceScope.cancel()
         server?.stop(1000, 2000)
+        try {
+            udpSocket?.close()
+            udpSocket = null
+        } catch (_: Exception) {}
+        unregisterNsdService()
+    }
+
+    private fun registerNsdService() {
+        try {
+            nsdManager = getSystemService(Context.NSD_SERVICE) as? NsdManager
+            val serviceInfo = NsdServiceInfo().apply {
+                serviceName = "DeviceSync-${Build.MODEL ?: "Android"}"
+                serviceType = "_devicesync._tcp."
+                port = PORT
+            }
+            nsdRegistrationListener = object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                    Log.d(TAG, "NSD service registered: ${serviceInfo.serviceName}")
+                }
+                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    Log.e(TAG, "NSD registration failed: $errorCode")
+                }
+                override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                    Log.d(TAG, "NSD service unregistered")
+                }
+                override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                    Log.e(TAG, "NSD unregistration failed: $errorCode")
+                }
+            }
+            nsdManager?.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, nsdRegistrationListener)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register NSD service: ${e.message}")
+        }
+    }
+
+    private fun unregisterNsdService() {
+        try {
+            nsdRegistrationListener?.let { nsdManager?.unregisterService(it) }
+            nsdRegistrationListener = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to unregister NSD service: ${e.message}")
+        }
+    }
+
+    private fun startUdpBeaconResponder() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val socket = DatagramSocket(PORT)
+                udpSocket = socket
+                val buffer = ByteArray(1024)
+                while (isActive && !socket.isClosed) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    socket.receive(packet)
+                    val msg = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                    if (msg.contains("devicesync_ping") || msg.contains("discover")) {
+                        val responseJson = gson.toJson(mapOf(
+                            "type" to "devicesync_pong",
+                            "device" to (Build.MODEL ?: "Android"),
+                            "port" to PORT,
+                            "protocol" to "2.0"
+                        ))
+                        val sendData = responseJson.toByteArray(Charsets.UTF_8)
+                        val replyPacket = DatagramPacket(sendData, sendData.size, packet.socketAddress)
+                        socket.send(replyPacket)
+                        Log.d(TAG, "Replied to UDP discovery ping from ${packet.socketAddress}")
+                    }
+                }
+            } catch (e: Exception) {
+                if (isActive) {
+                    Log.d(TAG, "UDP beacon responder ended: ${e.message}")
+                }
+            }
+        }
     }
 
     // ─── Ktor Signaling Server ──────────────────────────────────────────

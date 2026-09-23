@@ -21,7 +21,7 @@ namespace WindowsAgent
     public class ClipboardSyncEngine
     {
         // Endpoint is updated dynamically by NetworkMonitor after discovery
-        private string _hotspotIp = "192.168.43.1";
+        private string? _hotspotIp = null;
         private int _signalingPort = 7777;
 
         private readonly ClipboardDatabase _db;
@@ -78,10 +78,17 @@ namespace WindowsAgent
                 _wsCancellation?.Cancel();
                 _webSocket?.Dispose();
 
+                var targetIp = _hotspotIp ?? App.StorageSettings?.LastConnectedIp;
+                if (string.IsNullOrEmpty(targetIp))
+                {
+                    Debug.WriteLine("ClipboardSyncEngine: ConnectAsync aborted - no IP specified.");
+                    return;
+                }
+
                 _wsCancellation = new CancellationTokenSource();
                 _webSocket = new ClientWebSocket();
 
-                var uri = new Uri($"ws://{_hotspotIp}:{_signalingPort}/sync");
+                var uri = new Uri($"ws://{targetIp}:{_signalingPort}/sync");
                 StatusChanged?.Invoke("Connecting to Android agent...");
 
                 await _webSocket.ConnectAsync(uri, _wsCancellation.Token);

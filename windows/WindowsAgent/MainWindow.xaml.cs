@@ -336,6 +336,54 @@ public partial class MainWindow : Window
             EncryptionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0x6C, 0x70, 0x86));
         }
     }
+
+    private void DirectIpButton_Click(object sender, RoutedEventArgs e)
+    {
+        DirectIpInput.Text = App.StorageSettings?.LastConnectedIp ?? "";
+        DirectIpOverlay.Visibility = Visibility.Visible;
+        DirectIpInput.Focus();
+        DirectIpInput.SelectAll();
+    }
+
+    private void DirectIpCancel_Click(object sender, RoutedEventArgs e)
+    {
+        DirectIpOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private async void DirectIpConnect_Click(object sender, RoutedEventArgs e)
+    {
+        var ip = DirectIpInput.Text.Trim();
+        if (string.IsNullOrWhiteSpace(ip)) return;
+
+        DirectIpConnectButton.IsEnabled = false;
+        DirectIpConnectButton.Content = "Connecting...";
+
+        try
+        {
+            var success = await App.Monitor.ConnectDirectAsync(ip);
+            if (success)
+            {
+                DirectIpOverlay.Visibility = Visibility.Collapsed;
+            }
+        }
+        finally
+        {
+            DirectIpConnectButton.IsEnabled = true;
+            DirectIpConnectButton.Content = "Connect";
+        }
+    }
+
+    private void DirectIpInput_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            DirectIpConnect_Click(sender, e);
+        }
+        else if (e.Key == Key.Escape)
+        {
+            DirectIpCancel_Click(sender, e);
+        }
+    }
 }
 
 public class ClipboardDisplayItem

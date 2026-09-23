@@ -15,7 +15,7 @@ namespace WindowsAgent
     /// </summary>
     public class FileUploader
     {
-        private string _hotspotIp = "192.168.43.1";
+        private string? _hotspotIp = null;
         private int _signalingPort = 7777;
         private readonly ClipboardDatabase _db;
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromHours(2) };
@@ -77,7 +77,14 @@ namespace WindowsAgent
 
             try
             {
-                var url = $"http://{_hotspotIp}:{_signalingPort}/upload";
+                var targetIp = _hotspotIp ?? App.StorageSettings?.LastConnectedIp;
+                if (string.IsNullOrEmpty(targetIp))
+                {
+                    StatusChanged?.Invoke("Upload failed: No Android device connected");
+                    return false;
+                }
+
+                var url = $"http://{targetIp}:{_signalingPort}/upload";
                 using var request = new HttpRequestMessage(HttpMethod.Post, url);
 
                 request.Headers.Add("X-File-Name", Uri.EscapeDataString(fileName));

@@ -13,12 +13,14 @@ namespace WindowsAgent
     /// </summary>
     public class FileDownloader
     {
-        private string _hotspotIp = "192.168.43.1";
+        private string? _hotspotIp = null;
         private int _signalingPort = 7777;
         private readonly StorageSettings _storageSettings;
         private readonly ClipboardDatabase _db;
         private static readonly HttpClient _client = new HttpClient { Timeout = TimeSpan.FromHours(2) };
         private readonly HashSet<string> _downloadedTokens = new();
+
+        private string? TargetIp => _hotspotIp ?? _storageSettings?.LastConnectedIp;
 
         public event Action<string>? StatusChanged;
         public event Action<string, int, long, long>? DownloadProgressChanged;
@@ -41,9 +43,11 @@ namespace WindowsAgent
         /// </summary>
         public async Task CheckAndDownloadAsync()
         {
+            if (string.IsNullOrEmpty(TargetIp)) return;
+
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"http://{_hotspotIp}:{_signalingPort}/transfers");
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"http://{TargetIp}:{_signalingPort}/transfers");
                 if (App.SyncEngine.SessionToken != null)
                 {
                     request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
@@ -78,6 +82,8 @@ namespace WindowsAgent
             TransferInfo info,
             Action<long, long>? onProgress = null)
         {
+            if (string.IsNullOrEmpty(TargetIp)) return false;
+
             try
             {
                 var downloadFolder = _storageSettings.DownloadFolder;
@@ -95,7 +101,7 @@ namespace WindowsAgent
                     counter++;
                 }
 
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"http://{_hotspotIp}:{_signalingPort}/transfer/{info.Token}");
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"http://{TargetIp}:{_signalingPort}/transfer/{info.Token}");
                 if (App.SyncEngine.SessionToken != null)
                 {
                     request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);
@@ -145,7 +151,7 @@ namespace WindowsAgent
                 // Notify Android to delete the staged cache file
                 try
                 {
-                    var deleteUrl = $"http://{_hotspotIp}:{_signalingPort}/transfer/{info.Token}";
+                    var deleteUrl = $"http://{TargetIp}:{_signalingPort}/transfer/{info.Token}";
                     using var deleteReq = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
                     if (!string.IsNullOrEmpty(App.SyncEngine.SessionToken))
                         deleteReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", App.SyncEngine.SessionToken);

@@ -337,7 +337,39 @@
         </Border>
 
         <!-- Footer -->
-        <TextBlock Grid.Row="5" x:Name="FooterText" Text="Scanning for Android agent on port 7777..." 
-                   FontSize="10" Foreground="#585B70" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+            <TextBlock x:Name="FooterText" Text="Scanning for Android agent on port 7777..." 
+                       FontSize="10" Foreground="#585B70" VerticalAlignment="Center"/>
+            <TextBlock Text=" · " FontSize="10" Foreground="#45475A" VerticalAlignment="Center"/>
+            <Button x:Name="DirectIpButton" Content="Direct IP" Click="DirectIpButton_Click"
+                    Background="Transparent" BorderThickness="0" Foreground="#89B4FA" FontSize="10"
+                    Cursor="Hand" Padding="2,0" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Direct IP Dialog Overlay -->
+        <Border x:Name="DirectIpOverlay" Grid.Row="0" Grid.RowSpan="6" Background="#CC11111B" 
+                CornerRadius="12" Visibility="Collapsed" Panel.ZIndex="100">
+            <Border Width="340" Background="#1E1E2E" CornerRadius="12" Padding="20"
+                    BorderBrush="#313244" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Text="Connect to Android Device" FontSize="15" FontWeight="Bold" Foreground="#CDD6F4"/>
+                    <TextBlock Text="Enter the IP address shown on your Android app or notification:" 
+                               FontSize="11" Foreground="#A6ADC8" Margin="0,6,0,12" TextWrapping="Wrap"/>
+                    
+                    <TextBox x:Name="DirectIpInput" Background="#181825" Foreground="#CDD6F4" 
+                             BorderBrush="#45475A" BorderThickness="1" Padding="8,6" FontSize="13" Margin="0,0,0,14"
+                             KeyDown="DirectIpInput_KeyDown"/>
+                    
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Cancel" Click="DirectIpCancel_Click" Width="80" Height="30"
+                                Background="Transparent" Foreground="#A6ADC8" BorderBrush="#45475A" BorderThickness="1"
+                                Margin="0,0,8,0" Cursor="Hand"/>
+                        <Button x:Name="DirectIpConnectButton" Content="Connect" Click="DirectIpConnect_Click" Width="80" Height="30"
+                                Background="#89B4FA" Foreground="#11111B" FontWeight="SemiBold" BorderThickness="0"
+                                Cursor="Hand"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </Window>

@@ -14,11 +14,34 @@ namespace WindowsAgent
             AppDomain.CurrentDomain.BaseDirectory, "settings.txt");
         private static readonly string DeviceIdFilePath = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "device_id.txt");
+        private static readonly string LastIpFilePath = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "last_ip.txt");
 
         private string _downloadFolder;
         private string _deviceId;
+        private string? _lastConnectedIp;
 
         public string DeviceId => _deviceId;
+        public string? LastConnectedIp
+        {
+            get => _lastConnectedIp;
+            set
+            {
+                if (_lastConnectedIp != value)
+                {
+                    _lastConnectedIp = value;
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(value))
+                            File.WriteAllText(LastIpFilePath, value.Trim());
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"StorageSettings: Error saving last IP: {ex.Message}");
+                    }
+                }
+            }
+        }
 
         public event Action<string>? DownloadPathChanged;
 
@@ -75,6 +98,15 @@ namespace WindowsAgent
                 {
                     // Save the newly generated one
                     File.WriteAllText(DeviceIdFilePath, _deviceId);
+                }
+
+                if (File.Exists(LastIpFilePath))
+                {
+                    var savedIp = File.ReadAllText(LastIpFilePath).Trim();
+                    if (!string.IsNullOrWhiteSpace(savedIp))
+                    {
+                        _lastConnectedIp = savedIp;
+                    }
                 }
             }
             catch (Exception ex)
